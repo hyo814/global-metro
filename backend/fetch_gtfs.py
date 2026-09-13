@@ -20,12 +20,14 @@ import time
 import requests
 from dotenv import load_dotenv
 
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 BASE = "https://api.mobilitydatabase.org/v1"
-OUT = pathlib.Path("gtfs")
+OUT = ROOT / "gtfs"
 MAX_LIMIT = 2500  # API가 이보다 크면 422로 거부한다
 DELAY = 0.2       # ponytail: 고정 지연. 429가 실제로 나면 백오프로 올릴 것
 
-load_dotenv()
+load_dotenv(ROOT / ".env")
 REFRESH = os.getenv("MOBILITY_REFRESH_TOKEN")
 
 

@@ -1,0 +1,6 @@
+anthropic>=1.5
+duckdb>=1.5
+flask>=3.1
+gunicorn>=23.0
+python-dotenv>=1.0
+requests>=2.32

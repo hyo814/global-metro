@@ -17,12 +17,14 @@ import sqlite3
 
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+load_dotenv(ROOT / ".env")
 
 # 비용을 줄이려면 "claude-haiku-4-5"로. 다만 75개국 고유명사 음차는
 # 생각보다 어려워서 품질 차이가 난다.
 MODEL = "claude-opus-5"
-DB = pathlib.Path(".cache/translations.db")
+DB = ROOT / ".cache" / "translations.db"
 
 SYSTEM = """너는 대중교통 정류장·노선 이름을 한국어로 옮긴다.
 한국인 여행자가 현지에서 표지판과 대조하며 쓸 것이다.
@@ -64,12 +66,14 @@ def _call_api(texts):
     try:
         client = anthropic.Anthropic()
         # effort를 low로 낮추면 안전 분류기가 이 작업을 cyber로 오탐해서 절반쯤
-        # refusal이 난다(실측 4회 중 2회). 기본값을 쓴다. 캐싱 덕에 호출량이
-        # 적어서 어차피 비용 차이가 거의 없다.
+        # refusal이 난다(실측 4회 중 2회). medium은 거절 0/7이고 음차 오류도
+        # 없으면서 25%쯤 빠르다(7.4~9.3초 -> 5.2~7.8초). 한 번 호출이 곧
+        # 화면 대기 시간이라 이 차이가 체감된다.
         r = client.beta.messages.create(
             model=MODEL,
             max_tokens=8000,
             system=SYSTEM,
+            output_config={"effort": "medium"},
             betas=["server-side-fallback-2026-06-01"],
             fallbacks=[{"model": "claude-opus-4-8"}],   # 그래도 거절되면 자동 재시도
             messages=[{"role": "user",
@@ -91,6 +95,20 @@ def _call_api(texts):
         return {}
 
 
+def _first(name):
+    """다국어를 한 칸에 넣은 이름에서 앞부분만. "태국어;영어" 같은 형태가 있다.
+
+    그대로 번역하면 "모칫 2 버스터미널;모칫 2 버스터미널"처럼 같은 말이 두 번
+    나온다. 구분자 앞만 쓴다.
+    """
+    for sep in (";", "|"):
+        if sep in name:
+            head = name.split(sep, 1)[0].strip()
+            if head:
+                return head
+    return name
+
+
 def korean(texts, use_api=True):
     """원문 -> 한글. use_api=False면 캐시에 있는 것만 돌려준다.
 
@@ -101,9 +119,13 @@ def korean(texts, use_api=True):
     uniq = sorted({t.strip() for t in texts if t and t.strip()})
     if not uniq:
         return {}
+    # 번역은 구분자 앞부분만 하고, 결과는 원문 그대로를 열쇠로 돌려준다.
+    short = {t: _first(t) for t in uniq}
+    want = sorted(set(short.values()))
 
-    hit = cached(uniq)
-    missing = [t for t in uniq if t not in hit]
+    hit = {t: v for t in uniq
+           for v in [cached([short[t]]).get(short[t])] if v}
+    missing = [s for s in want if s not in {short[t]: hit[t] for t in hit}]
     if not missing or not use_api or not os.getenv("ANTHROPIC_API_KEY"):
         return hit
 
@@ -111,7 +133,11 @@ def korean(texts, use_api=True):
     if fresh:
         with _db() as con:
             con.executemany("INSERT OR REPLACE INTO ko VALUES (?, ?)", fresh.items())
-    return {**hit, **fresh}
+    out = dict(hit)
+    for t in uniq:
+        if short[t] in fresh:
+            out[t] = fresh[short[t]]
+    return out
 
 
 QUERY_SYSTEM = """사용자가 입력한 대중교통 정류장·역 이름을,
