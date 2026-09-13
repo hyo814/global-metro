@@ -66,24 +66,40 @@ def stops():
     # 한글로 검색하면 인덱스(현지 표기)에 걸리지 않는다. 현지 표기 후보로 바꿔
     # 다시 찾는다. 이게 이 앱을 만든 이유라서 폴백이 아니라 본 경로에 가깝다.
     if not rows:
-        cands = to_original(q)[:4]
-        seen, pool = set(), []
-        for cand in cands:
+        guess_cc, cands = to_original(q)
+        cands = cands[:4]
+        # 사용자가 국가를 고르지 않았으면 모델이 판단한 국가로 좁힌다.
+        # 한 문자 체계 안에서만 비교하게 되어 순위가 안정된다.
+        scope = country or guess_cc
+
+        def gather(cc):
             # 후보별로 끊지 않고 전부 모은다. 한 후보가 25칸을 다 먹으면
             # 더 정확한 뒤쪽 후보("新宿" 다음의 "新宿駅")가 검색조차 안 된다.
-            for r in search(cand, country, limit=25):
-                key = (r["feed_id"], r["stop_id"])
-                if key not in seen:
-                    seen.add(key)
-                    pool.append(r)
+            seen, out = set(), []
+            for cand in cands:
+                for r in search(cand, cc, limit=25):
+                    key = (r["feed_id"], r["stop_id"])
+                    if key not in seen:
+                        seen.add(key)
+                        out.append(r)
+            return out
+
+        pool = gather(scope)
+        # 폴백은 풀 전체가 빌 때만. 후보별로 걸면 "Osaka"가 일본에서 0건일 때
+        # 전 세계로 넓어져 독일의 Osakaallee가 딸려 들어온다.
+        if not pool and scope != country:
+            pool = gather(country)
         low = {c.casefold() for c in cands}
 
         def specificity(name):
             """이름이 시작하는 후보 중 가장 긴 것의 길이.
 
-            "오사카"의 후보는 大阪 / 大阪駅 둘 다다. 大阪駅ＪＲ高速バスターミナル은
-            더 구체적인 大阪駅로 시작하므로, 大阪屋ショップ(마트)보다 위여야 한다.
-            정차 횟수만 보면 손님 많은 마트가 이겨버린다.
+            "오사카"의 후보는 大阪와 大阪駅 둘 다다. 大阪駅ＪＲ高速バスターミナル은
+            더 구체적인 大阪駅로 시작하므로 大阪屋ショップ(마트)보다 위여야 한다.
+            정차 횟수만 보면 손님 많은 마트가 이긴다.
+
+            국가로 좁힌 뒤라 비교 대상이 같은 문자 체계다. 그래서 글자 수를
+            그대로 써도 된다.
             """
             n = name.casefold()
             return max((len(c) for c in cands if n.startswith(c.casefold())),
