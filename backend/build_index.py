@@ -23,9 +23,11 @@ import sys
 import time
 import zipfile
 
-OUT = pathlib.Path(".cache/stops.db")
-META = pathlib.Path(".cache/feeds.json")
-GTFS = pathlib.Path("gtfs")
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+OUT = ROOT / ".cache" / "stops.db"
+META = ROOT / ".cache" / "feeds.json"
+GTFS = ROOT / "gtfs"
 
 
 def feed_countries():

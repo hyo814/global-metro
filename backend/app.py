@@ -8,6 +8,7 @@
     python3 build_index.py     # 먼저 인덱스 구축
     python3 app.py
 """
+import os
 import socket
 import threading
 from datetime import datetime
@@ -19,7 +20,11 @@ from build_index import countries, feed_info, search
 from gtfs import Feed
 from translate import korean, to_original
 
-app = Flask(__name__, static_folder="static")
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+FRONTEND_DIST = os.environ.get("FRONTEND_DIST", os.path.join(ROOT, "frontend", "dist"))
+
+# static_folder=None: 빌드된 프론트는 아래 SPA 라우트가 직접 서빙한다.
+app = Flask(__name__, static_folder=None)
 
 
 # ponytail: 최근 쓴 피드 16개만 열어둔다. 밀려난 Feed의 DuckDB 커넥션은 GC가
@@ -42,11 +47,6 @@ def with_korean(rows, *fields, use_api=False):
         for f in fields:
             r[f + "_ko"] = ko.get((r.get(f) or "").strip(), "")
     return rows
-
-
-@app.get("/")
-def index():
-    return send_from_directory("static", "index.html")
 
 
 @app.post("/api/translate")
@@ -145,6 +145,19 @@ def departures():
     })
 
 
+@app.get("/", defaults={"path": ""})
+@app.get("/<path:path>")
+def spa(path):
+    """빌드된 프론트. 개발 중에는 Vite가 이 자리를 대신한다."""
+    if path and os.path.isfile(os.path.join(FRONTEND_DIST, path)):
+        return send_from_directory(FRONTEND_DIST, path)
+    index = os.path.join(FRONTEND_DIST, "index.html")
+    if not os.path.isfile(index):
+        return ("프론트가 아직 빌드되지 않았습니다.\n"
+                "개발: ./dev.sh   ·   빌드: cd frontend && npm run build\n"), 503
+    return send_from_directory(FRONTEND_DIST, "index.html")
+
+
 def lan_ip():
     """같은 Wi-Fi의 폰에서 접속할 주소. 실제로 나가지는 않는 UDP 소켓으로 알아낸다."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -158,7 +171,8 @@ def lan_ip():
 
 
 if __name__ == "__main__":
-    print(f"\n  폰에서 열기:  http://{lan_ip()}:5001\n"
-          f"  같은 Wi-Fi에 있어야 합니다.\n")
+    # 개발 중에는 dev.sh가 Vite(5173) 주소를 따로 안내한다. 이건 빌드된
+    # 프론트를 Flask가 직접 서빙할 때의 주소다.
+    print(f"\n  API + 빌드된 프론트:  http://{lan_ip()}:5001\n")
     # 0.0.0.0: 같은 네트워크의 다른 기기에서 접속할 수 있게 한다.
     app.run(host="0.0.0.0", port=5001, threaded=True)

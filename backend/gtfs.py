@@ -25,7 +25,9 @@ from zoneinfo import ZoneInfo
 
 import duckdb
 
-CACHE = pathlib.Path(".cache/gtfs")
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+CACHE = ROOT / ".cache" / "gtfs"
 TABLES = ("agency", "stops", "stop_times", "trips", "routes",
           "calendar", "calendar_dates", "frequencies")
 DOW = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")

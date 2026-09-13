@@ -17,12 +17,14 @@ import sqlite3
 
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+load_dotenv(ROOT / ".env")
 
 # 비용을 줄이려면 "claude-haiku-4-5"로. 다만 75개국 고유명사 음차는
 # 생각보다 어려워서 품질 차이가 난다.
 MODEL = "claude-opus-5"
-DB = pathlib.Path(".cache/translations.db")
+DB = ROOT / ".cache" / "translations.db"
 
 SYSTEM = """너는 대중교통 정류장·노선 이름을 한국어로 옮긴다.
 한국인 여행자가 현지에서 표지판과 대조하며 쓸 것이다.
