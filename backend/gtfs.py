@@ -19,6 +19,7 @@
 자체 점검:  python3 gtfs.py
 """
 import pathlib
+import shutil
 import zipfile
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -91,8 +92,12 @@ class Feed:
         self.tz = ZoneInfo(row[0]) if row else ZoneInfo("UTC")
 
     def _extract(self):
+        # zip이 더 새것이면 다시 푼다. 피드를 갱신했는데 옛 압축본을 계속 읽어
+        # 바뀐 내용이 반영되지 않는 일이 실제로 있었다.
         if self.dir.exists():
-            return
+            if self.dir.stat().st_mtime >= self.path.stat().st_mtime:
+                return
+            shutil.rmtree(self.dir, ignore_errors=True)
         tmp = self.dir.with_name(self.dir.name + ".part")
         with zipfile.ZipFile(self.path) as z:
             have = set(z.namelist())
@@ -281,7 +286,7 @@ def demo():
     assert secs("00:00:00") == 0 and secs("") is None
     assert hhmm(91800) == "01:30", "자정 넘김 표시 실패"
 
-    f = Feed("gtfs/mdb-2254_Bay_Area_Transportation_Authority.zip")
+    f = Feed(str(ROOT / "gtfs") + "/mdb-2254_Bay_Area_Transportation_Authority.zip")
     assert str(f.tz) == "America/New_York", f"타임존: {f.tz}"          # 지뢰 3
     today = datetime.now(f.tz).date()
     assert f.services_on(today), "오늘 운행 service가 없음"             # 지뢰 2
@@ -292,12 +297,12 @@ def demo():
     assert deps == sorted(deps, key=lambda d: d["secs"]), "정렬 안 됨"
 
     # calendar.txt가 없는 피드도 운행일이 나와야 한다 (전체의 37%)
-    g = Feed("gtfs/tld-4777_Athens_Clarke_County_Transit.zip")
+    g = Feed(str(ROOT / "gtfs") + "/tld-4777_Athens_Clarke_County_Transit.zip")
     assert not (g.dir / "calendar.txt").exists(), "이 피드는 calendar.txt가 없어야 함"
     assert g.services_on(today), "calendar_dates만으로 운행일을 못 구함"  # 지뢰 2
 
     # 24시 초과 시각을 가진 피드 (지뢰 1)
-    a = Feed("gtfs/mdb-1029_Auckland_Transport.zip")
+    a = Feed(str(ROOT / "gtfs") + "/mdb-1029_Auckland_Transport.zip")
     over = a.con.execute(f"""
         SELECT stop_id, {_sql_secs('departure_time')} AS s FROM stop_times
         WHERE {_sql_secs('departure_time')} >= 86400 LIMIT 1""").fetchone()
@@ -317,7 +322,7 @@ def demo():
     assert a.departures(station, now=noon, limit=5), "역 조회가 비어 있음"
 
     # frequencies 기반 피드: stop_times는 패턴이고 headway로 펼쳐져야 한다 (지뢰 4)
-    b = Feed("gtfs/mdb-1985_Aeroexpreso.zip")
+    b = Feed(str(ROOT / "gtfs") + "/mdb-1985_Aeroexpreso.zip")
     day = next(d for d in (datetime.now(b.tz).date() + timedelta(days=i)
                            for i in range(400)) if b.services_on(d))
     probe = datetime(day.year, day.month, day.day, 0, 0, tzinfo=b.tz)

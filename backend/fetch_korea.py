@@ -31,10 +31,12 @@ import math
 import os
 import pathlib
 import sys
+import time
 import zipfile
 
 import requests
 from dotenv import load_dotenv
+from urllib.parse import unquote
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
@@ -42,11 +44,27 @@ load_dotenv(ROOT / ".env")
 OUT = ROOT / "gtfs"
 ROUTE_API = "https://apis.data.go.kr/1613000/BusRouteInfoInqireService"
 STOP_API = "https://apis.data.go.kr/1613000/BusSttnInfoInqireService"
-KEY = os.getenv("DATA_GO_KR_KEY")
+def _key():
+    """인증키. Encoding/Decoding 어느 쪽을 붙여도 되게 한다.
+
+    공공데이터포털은 같은 키를 두 형태로 보여준다. Encoding 쪽은 이미 URL
+    인코딩이 되어 있어서, 그대로 쓰면 requests가 한 번 더 인코딩해 %2F가
+    %252F가 되고 403이 돌아온다. 사람이 틀리기 쉬운 자리라 코드가 흡수한다.
+    """
+    raw = (os.getenv("DATA_GO_KR_KEY") or "").strip()
+    return unquote(raw) if "%" in raw else raw
+
+
+KEY = _key()
 
 SPEED = 18_000 / 3600      # m/s. 도심 시내버스 표정속도 18km/h로 잡은 추정치
 DWELL = 20                 # s. 정류장당 정차 시간
 PAGE = 1000                # 한 번에 받을 행 수
+GAP = 0.12                 # s. 호출 사이 간격
+RETRY = 5                  # 일시적 거절에 대한 재시도 횟수
+
+# 포털이 몰아치는 요청을 막을 때 돌려주는 코드들. 잠시 쉬면 풀린다.
+BUSY = {"99", "22", "04"}
 
 # GTFS route_type. TAGO의 routetp는 한국어 분류라 전부 버스(3)로 간다.
 BUS = "3"
@@ -58,20 +76,37 @@ def die(msg):
 
 
 def call(base, op, **params):
-    """공공데이터포털 호출. 응답 형태가 제멋대로라 여기서 다 흡수한다."""
+    """공공데이터포털 호출. 응답 형태가 제멋대로라 여기서 다 흡수한다.
+
+    노선 300개짜리 도시는 호출이 600번이라 그냥 두면 "가용한 세션이 없습니다"로
+    막힌다. 사이를 띄우고, 막히면 물러났다 다시 시도한다.
+    """
     params = {"serviceKey": KEY, "_type": "json", "numOfRows": PAGE,
               "pageNo": 1, **params}
-    r = requests.get(f"{base}/{op}", params=params, timeout=60)
-    r.raise_for_status()
-    try:
-        body = r.json()
-    except ValueError:
-        # 인증 실패는 JSON이 아니라 XML 에러로 온다
-        die(f"{op}: JSON이 아닌 응답입니다. 키가 잘못됐을 수 있습니다.\n{r.text[:300]}")
+    wait = 0.6
+    for attempt in range(RETRY):
+        time.sleep(GAP)
+        r = requests.get(f"{base}/{op}", params=params, timeout=60)
+        if r.status_code in (429, 500, 502, 503):
+            time.sleep(wait); wait *= 2
+            continue
+        r.raise_for_status()
+        try:
+            body = r.json()
+        except ValueError:
+            # 인증 실패는 JSON이 아니라 XML 에러로 온다
+            die(f"{op}: JSON이 아닌 응답입니다. 키가 잘못됐을 수 있습니다.\n{r.text[:300]}")
 
-    head = (body.get("response") or {}).get("header") or {}
-    if head.get("resultCode") not in ("00", "0", None):
-        die(f"{op}: {head.get('resultCode')} {head.get('resultMsg')}")
+        head = (body.get("response") or {}).get("header") or {}
+        code = str(head.get("resultCode") or "").strip()
+        if code in BUSY:
+            time.sleep(wait); wait *= 2
+            continue
+        if code not in ("00", "0", ""):
+            die(f"{op}: {code} {head.get('resultMsg')}")
+        break
+    else:
+        die(f"{op}: 포털이 계속 거절합니다. 잠시 뒤 다시 시도하세요.")
 
     payload = (body.get("response") or {}).get("body") or {}
     items = payload.get("items")
@@ -163,6 +198,7 @@ def build_city(code, name):
     print(f"  노선 {len(routes)}개")
 
     stops, s_rows, t_rows, r_rows, f_rows = {}, [], [], [], []
+    skipped = {"정차정보없음": 0, "배차없음": 0, "운행시각없음": 0}
     for i, r in enumerate(routes, 1):
         rid = str(r.get("routeid") or "").strip()
         if not rid:
@@ -170,58 +206,91 @@ def build_city(code, name):
         seq = call_all(ROUTE_API, "getRouteAcctoThrghSttnList",
                        cityCode=code, routeId=rid)
         if len(seq) < 2:
+            skipped["정차정보없음"] += 1
             continue
         seq.sort(key=lambda x: int(x.get("nodeord") or 0))
 
         info, _ = call(ROUTE_API, "getRouteInfoIem", cityCode=code, routeId=rid)
         info = info[0] if info else {}
-        first = hhmmss(info.get("startvehicletime")) or "05:30:00"
-        last = hhmmss(info.get("endvehicletime")) or "23:00:00"
+        first = hhmmss(info.get("startvehicletime"))
+        last = hhmmss(info.get("endvehicletime"))
+
+        # 배차간격이 없으면 이 노선은 버린다. 넣어봐야 stop_times가 00시
+        # 출발로 읽혀서 거짓말이 된다. 실제로 제주는 전 노선이 여기 걸린다.
+        heads = {svc: minutes(info.get(field))
+                 for svc, field in (("weekday", "intervaltime"),
+                                    ("sat", "intervalsattime"),
+                                    ("sun", "intervalsuntime"))}
+        if not heads.get("weekday"):
+            skipped["배차없음"] += 1
+            continue
+        if not (first and last) or first >= last:
+            skipped["운행시각없음"] += 1
+            continue
 
         r_rows.append({"route_id": rid, "agency_id": f"tago-{code}",
                        "route_short_name": str(r.get("routeno") or "").strip(),
                        "route_long_name": f"{info.get('startnodenm','')}-{info.get('endnodenm','')}".strip("-"),
                        "route_type": BUS})
 
-        trip_id = f"{rid}-1"
-        t_rows.append({"route_id": rid, "service_id": "weekday", "trip_id": trip_id,
-                       "trip_headsign": str(seq[-1].get("nodenm") or "").strip()})
+        # TAGO는 왕복을 한 줄로 준다. 33-1번은 정차 66개인데 첫 정류장과 마지막
+        # 정류장이 같고, 진짜 종점("구완동")이 32~33번째에 있다. 그대로 두면
+        # 나갔다 돌아오는 한 덩어리가 되어 행선지도 소요시간도 틀린다.
+        # 종점에서 잘라 두 방향으로 나눈다.
+        start_nm = str(info.get("startnodenm") or "").strip()
+        end_nm = str(info.get("endnodenm") or "").strip()
+        turn = [k for k, x in enumerate(seq)
+                if str(x.get("nodenm") or "").strip() == end_nm]
+        if turn and 0 < turn[-1] < len(seq) - 1:
+            legs = [(seq[:turn[-1] + 1], end_nm), (seq[turn[-1]:], start_nm or "기점")]
+        else:
+            legs = [(seq, end_nm or start_nm or "순환")]   # 순환 노선
 
-        # 소요시간은 좌표 거리로 추정한다. TAGO가 주지 않는 값이다.
-        clock, prev = 0, None
-        for order, s in enumerate(seq):
-            sid = str(s.get("nodeid") or "").strip()
-            try:
-                la, lo = float(s.get("gpslati")), float(s.get("gpslong"))
-            except (TypeError, ValueError):
+        for d, (part, headsign) in enumerate(legs):
+            if len(part) < 2:
                 continue
-            stops[sid] = {"stop_id": sid, "stop_name": str(s.get("nodenm") or "").strip(),
-                          "stop_lat": la, "stop_lon": lo}
-            if prev is not None:
-                clock += int(dist(prev, (la, lo)) / SPEED) + DWELL
-            prev = (la, lo)
-            hms = f"{clock // 3600:02d}:{clock % 3600 // 60:02d}:{clock % 60:02d}"
-            s_rows.append({"trip_id": trip_id, "arrival_time": hms, "departure_time": hms,
-                           "stop_id": sid, "stop_sequence": order})
+            base_id = f"{rid}-{d}"
 
-        for svc, field in (("weekday", "intervaltime"), ("sat", "intervalsattime"),
-                           ("sun", "intervalsuntime")):
-            head = minutes(info.get(field))
-            if head:
-                f_rows.append({"trip_id": trip_id if svc == "weekday" else f"{rid}-{svc}",
-                               "start_time": first, "end_time": last,
+            # 소요시간은 좌표 거리로 추정한다. TAGO가 주지 않는 값이다.
+            times, clock, prev = [], 0, None
+            for order, st in enumerate(part):
+                sid = str(st.get("nodeid") or "").strip()
+                try:
+                    la, lo = float(st.get("gpslati")), float(st.get("gpslong"))
+                except (TypeError, ValueError):
+                    continue
+                stops[sid] = {"stop_id": sid,
+                              "stop_name": str(st.get("nodenm") or "").strip(),
+                              "stop_lat": la, "stop_lon": lo}
+                if prev is not None:
+                    clock += int(dist(prev, (la, lo)) / SPEED) + DWELL
+                prev = (la, lo)
+                times.append((sid, order,
+                              f"{clock // 3600:02d}:{clock % 3600 // 60:02d}:{clock % 60:02d}"))
+            if len(times) < 2:
+                continue
+
+            for svc in ("weekday", "sat", "sun"):
+                head = heads.get(svc) or heads["weekday"]
+                if not head:
+                    continue
+                tid = f"{base_id}-{svc}"
+                t_rows.append({"route_id": rid, "service_id": svc, "trip_id": tid,
+                               "trip_headsign": headsign})
+                f_rows.append({"trip_id": tid, "start_time": first, "end_time": last,
                                "headway_secs": head, "exact_times": 0})
-                if svc != "weekday":
-                    t_rows.append({"route_id": rid, "service_id": svc,
-                                   "trip_id": f"{rid}-{svc}",
-                                   "trip_headsign": t_rows[0]["trip_headsign"]})
-                    for row in [x for x in s_rows if x["trip_id"] == trip_id]:
-                        s_rows.append({**row, "trip_id": f"{rid}-{svc}"})
+                for sid, order, hms in times:
+                    s_rows.append({"trip_id": tid, "arrival_time": hms,
+                                   "departure_time": hms, "stop_id": sid,
+                                   "stop_sequence": order})
+
         if i % 50 == 0:
             print(f"    {i}/{len(routes)} · 정류장 {len(stops):,}")
 
+    if any(skipped.values()):
+        print("  제외: " + " · ".join(f"{k} {v}" for k, v in skipped.items() if v))
     if not s_rows:
-        die("변환할 정차 정보가 없습니다. --probe 로 응답 형태를 확인하세요.")
+        die("쓸 수 있는 노선이 없습니다. 이 도시는 배차간격을 공개하지 않습니다.")
 
     cal = [{"service_id": "weekday", "monday": 1, "tuesday": 1, "wednesday": 1,
             "thursday": 1, "friday": 1, "saturday": 0, "sunday": 0,
@@ -252,7 +321,9 @@ def build_city(code, name):
     }
 
     OUT.mkdir(exist_ok=True)
-    path = OUT / f"tago-{code}_{name}.zip"
+    # 도시명에 슬래시가 들어간다("대전광역시/계룡시"). 파일 이름으로 쓸 수 없다.
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in name).strip("_")
+    path = OUT / f"tago-{code}_{safe[:60]}.zip"
     tmp = path.with_suffix(".part")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
         for fname, rows in files.items():

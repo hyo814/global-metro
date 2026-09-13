@@ -18,7 +18,7 @@ import math
 import time
 from collections import defaultdict
 
-from gtfs import Feed, hhmm, secs
+from gtfs import ROOT, Feed, hhmm, secs
 
 WALK_SPEED = 1.2       # m/s. 실측 보행 속도의 보수적인 값
 WALK_BUILD = 1500      # m. 여기까지 미리 이어두고, 실제 한도는 탐색 때 고른다
@@ -407,7 +407,7 @@ def demo():
     import random
     from datetime import datetime
 
-    f = Feed("../gtfs/mdb-865_Helsingin_seudun_liikenne__HSL.zip")
+    f = Feed(str(ROOT / "gtfs") + "/mdb-865_Helsingin_seudun_liikenne__HSL.zip")
     tt = Timetable([("hsl", f)], datetime.now(f.tz).date())
     assert tt.pat_stops, "패턴이 비었음"
     assert tt.foot, "도보 환승이 만들어지지 않았음"
@@ -485,7 +485,7 @@ def _check_frequencies():
     """
     from datetime import datetime, timedelta
 
-    f = Feed("../gtfs/mdb-1985_Aeroexpreso.zip")
+    f = Feed(str(ROOT / "gtfs") + "/mdb-1985_Aeroexpreso.zip")
     day = next(d for d in (datetime.now(f.tz).date() + timedelta(days=i)
                            for i in range(400)) if f.services_on(d))
     tt = Timetable([("x", f)], day)
