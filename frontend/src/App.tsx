@@ -163,6 +163,8 @@ export default function App() {
     setActive(k);
   };
 
+  // 방금 고른 정류장의 이름이 칸에 남아 있는 것뿐이다. 못 찾은 게 아니다.
+  const chosenHere = !!stop[active] && shown(stop[active]!) === q;
   const fields: [Slot, string][] = [["from", "출발"], ["to", "도착"]];
   const both = stop.from && stop.to;
   const walks: [number, string][] = [[350, "적게"], [500, "보통"], [1200, "많이"]];
@@ -216,7 +218,7 @@ export default function App() {
 
         <ul className="hits">
           {busy && <li className="note">찾는 중…</li>}
-          {!busy && q.trim() && !hits.length && (
+          {!busy && q.trim() && !hits.length && !chosenHere && (
             <li className="note">그 이름으로는 찾지 못했습니다. 철자를 바꾸거나 국가를 넓혀 보세요.</li>
           )}
           {hits.map((r) => (

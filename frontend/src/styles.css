@@ -37,33 +37,36 @@ body {
 .brand span { font-size: 12.5px; color: var(--dim); }
 
 .find { padding: 0 26px 18px; display: grid; gap: 8px; }
+/* 라벨과 입력칸 사이에 숨 쉴 틈. 붙어 있으면 "출발정류장이름"처럼 읽힌다. */
 .field { position: relative; display: grid;
-         grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center;
+         grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px;
+         align-items: center; padding-left: 14px;
          background: var(--rail-2); border: 1px solid transparent; border-radius: 9px; }
 .field.on { border-color: var(--ink); background: var(--rail); }
 .field .tag { font-size: 11.5px; font-weight: 600; color: var(--dim);
-              padding-left: 13px; letter-spacing: 0.02em; white-space: nowrap; }
-.field input { background: none; border: none; padding: 12px 4px 12px 0; }
+              letter-spacing: 0.02em; white-space: nowrap; }
+.field input { width: 100%; font: inherit; font-size: 16px; color: var(--ink);
+               background: none; border: none; border-radius: 0;
+               padding: 12px 4px 12px 0; }
+.field input::placeholder { color: var(--dim); }
 .field input:focus-visible { outline: none; }
 .field button { border: none; background: none; cursor: pointer; font-size: 17px;
                 line-height: 1; color: var(--dim); padding: 0 12px; }
 .field button:hover { color: var(--ink); }
 /* 16px 미만이면 iOS가 탭할 때 화면을 확대한다 */
-.find input, .find select {
-  width: 100%; font: inherit; font-size: 16px; color: var(--ink);
+.find select {
+  width: 100%; font: inherit; font-size: 16px; color: var(--dim);
   background: var(--rail-2); border: 1px solid transparent;
   border-radius: 9px; padding: 12px 14px;
 }
-.find select { font-size: 14px; color: var(--dim); }
-.find input::placeholder { color: var(--dim); }
-.find input:focus-visible, .find select:focus-visible {
-  outline: none; background: var(--rail); border-color: var(--ink);
-}
+.find select:focus-visible { outline: none; background: var(--rail);
+                             border-color: var(--ink); }
 
 /* 걸어도 되는 거리. 환승을 줄이려면 더 걸어야 할 때가 있다. */
-.walkpick { display: flex; align-items: center; gap: 4px; padding-top: 2px; }
+.walkpick { display: flex; align-items: center; gap: 4px;
+            padding: 2px 0 0 14px; }
 .walkpick span { font-size: 11.5px; color: var(--dim); font-weight: 600;
-                 width: 44px; padding-left: 13px; }
+                 width: 34px; margin-right: 12px; }
 .walkpick button { font: inherit; font-size: 13px; color: var(--dim); cursor: pointer;
                    background: var(--rail-2); border: 1px solid transparent;
                    border-radius: 7px; padding: 6px 12px; flex: 1; }
@@ -203,16 +206,27 @@ body {
   .rail { border-bottom: 1px solid var(--line); max-height: 48vh; }
   .brand { padding: 18px 20px 12px; }
   .find { padding: 0 20px 14px; }
-  .walkpick span { width: 40px; padding-left: 10px; }
-  .field { grid-template-columns: 40px minmax(0, 1fr) auto; }
-  .field .tag { padding-left: 10px; }
+  .walkpick { padding-left: 12px; }
+  .walkpick span { width: 32px; margin-right: 10px; }
+  .field { grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px;
+           padding-left: 12px; }
   .hit, .note { padding-left: 20px; padding-right: 20px; }
   .board { padding: 26px 20px calc(40px + env(safe-area-inset-bottom)); }
-  .stophead h1 { font-size: 28px; }
-  .stophead .orig { font-size: 15px; }
-  .steps li { grid-template-columns: 46px 16px minmax(0, 1fr); gap: 10px; }
-  .steps li::before { left: 53px; }
-  .steps .at.end { grid-column: 3; grid-row: 1; text-align: right; }
+  .stophead { margin-bottom: 18px; }
+  .stophead h1 { font-size: 24px; letter-spacing: -0.03em; }
+  .stophead .orig { font-size: 14px; }
+  .stophead .meta { margin-top: 12px; padding-top: 10px; font-size: 12px;
+                    flex-wrap: wrap; gap: 6px 12px; }
+  .sum { gap: 10px; padding-bottom: 10px; }
+  .steps li { padding: 10px 0; }
+  /* 3칸으로 줄였더니 .what과 도착시각이 같은 칸에 겹쳤다. 칸은 그대로 두고
+     폭만 줄인다. */
+  .steps li { grid-template-columns: 44px 14px minmax(0, 1fr) 42px; gap: 9px; }
+  .steps li::before { left: 50px; }
+  .steps .at { font-size: 16px; }
+  .steps .at.end { font-size: 13px; }
+  .steps .what b { font-size: 15px; }
+  .steps .route { margin-right: 6px; padding: 1px 6px; }
   .sum b { font-size: 22px; }
   .runs li { grid-template-columns: 74px minmax(0, 1fr) auto; gap: 12px;
              row-gap: 6px; padding: 13px 0; }

@@ -74,8 +74,9 @@ export default function JourneyPanel({
         </p>
         <div className="meta">
           <span>
-            {data?.agency ?? from.agency}
-            {data && data.feeds > 1 && <em>운영사 {data.feeds}곳을 이어서</em>}
+            {data && data.feeds > 1
+              ? `운영사 ${data.feeds}곳을 이어서`
+              : (data?.agency ?? from.agency)}
           </span>
           {data?.local_time && <time className="num">현지 {data.local_time}</time>}
         </div>

@@ -285,9 +285,10 @@ def route():
             if l.get("headsign"):
                 l["headsign_ko"] = ko.get(l["headsign"], "")
 
-    return jsonify({"agency": ", ".join(sorted({f["agency"] for f in
-                        [feed_info(fid) or {"agency": ""} for fid, _ in key]}
-                        - {""}))[:80],
+    # 운영사를 다 나열하면 화면이 일본어 벽이 된다. 여러 곳이면 화면이
+    # "운영사 N곳"으로만 쓰고, 한 곳일 때만 이름을 쓴다.
+    home = feed_info(src["feed_id"]) or {}
+    return jsonify({"agency": home.get("agency", ""),
                     "feeds": len(key), "walk": walk,
                     "timezone": str(feed.tz), "local_time": now.strftime("%H:%M"),
                     "plans": out})
