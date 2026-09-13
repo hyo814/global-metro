@@ -60,6 +60,9 @@
   .hit b { font-weight: 500; font-size: 15px; display: block; }
   .hit em { font-style: normal; color: var(--muted); font-size: 13px; display: block; }
   .hit i  { font-style: normal; color: var(--muted); font-size: 12px; }
+  /* 안내 문구는 결과 행이 아니다. 30px 뱃지 칸에 들어가면 세로로 떨어진다. */
+  .note { display: block; cursor: default; color: var(--muted); font-size: 13px; }
+  .note:hover { background: none; }
   .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--rule);
          border-radius: 4px; padding: 0 4px; margin-left: 5px; }
 
@@ -172,13 +175,13 @@ async function run() {
   writeUrl({ q, country });
   if (!q) { hits = []; $('#hits').innerHTML = ''; return blank(); }
 
-  $('#hits').innerHTML = `<li class="hit"><i>찾는 중…</i></li>`;
+  $('#hits').innerHTML = `<li class="hit note">찾는 중…</li>`;
   hits = await (await fetch(
     `/api/stops?q=${encodeURIComponent(q)}&country=${encodeURIComponent(country)}`)).json();
 
   if (!hits.length) {
-    $('#hits').innerHTML = `<li class="hit"><i>그 이름으로는 찾지 못했습니다.
-      철자를 바꾸거나 국가를 넓혀 보세요.</i></li>`;
+    $('#hits').innerHTML = `<li class="hit note">그 이름으로는 찾지 못했습니다.
+      철자를 바꾸거나 국가를 넓혀 보세요.</li>`;
     return;
   }
   paintHits();
