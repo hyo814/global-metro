@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>어디로 가는 차</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@500;700;900&family=IBM+Plex+Sans+KR:wght@300;400;500;600&display=swap">
+<style>
+  :root {
+    --paper:  #f1f4f2;
+    --card:   #ffffff;
+    --ink:    #0e1712;
+    --muted:  #5d6b63;
+    --rule:   #d7ded9;
+    --line:   #00a84d;   /* 서울 2호선 초록. 임의로 고른 색이 아니라 실제 노선 색 */
+    --line-2: #0052a4;   /* 1호선 남색 */
+    --warn:   #b4531f;
+
+    --display: "Gothic A1", "Apple SD Gothic Neo", sans-serif;
+    --body: "IBM Plex Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0b110d; --card: #121a15; --ink: #e7ede9;
+      --muted: #8d9c93; --rule: #1f2b24; --line: #2fd47a;
+      --line-2: #5a9bdc; --warn: #e08a52;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0b110d; --card: #121a15; --ink: #e7ede9;
+    --muted: #8d9c93; --rule: #1f2b24; --line: #2fd47a;
+    --line-2: #5a9bdc; --warn: #e08a52;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 400 16px/1.75 var(--body);
+    -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  ::selection { background: var(--line); color: var(--card); }
+
+  /* 페이지를 관통하는 선. 섹션이 역이 된다. */
+  .wrap { max-width: 1020px; margin: 0 auto; padding: 0 24px 100px; }
+  .line { position: relative; padding-left: 34px; }
+  .line::before {
+    content: ""; position: absolute; left: 5px; top: 10px; bottom: 0;
+    width: 2px; background: var(--rule);
+  }
+  section { position: relative; padding: 52px 0 8px; }
+  section::before {
+    content: ""; position: absolute; left: -34px; top: 62px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--paper); border: 2px solid var(--line);
+  }
+  section > h2 {
+    margin: 0 0 6px; font-family: var(--display); font-weight: 900;
+    font-size: clamp(22px, 3vw, 28px); letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  section > h2 + p.lede { margin: 0 0 26px; color: var(--muted); max-width: 62ch; }
+  p { max-width: 66ch; }
+
+  /* ── 표제 ─────────────────────────────── */
+  header { padding: 76px 0 8px; }
+  .kicker {
+    display: inline-block; font-size: 12.5px; font-weight: 600; color: var(--line);
+    border: 1.5px solid var(--line); border-radius: 100px; padding: 3px 12px;
+    margin-bottom: 22px;
+  }
+  h1 {
+    margin: 0; font-family: var(--display); font-weight: 900;
+    font-size: clamp(40px, 7.4vw, 76px); line-height: 1.02;
+    letter-spacing: -0.045em; text-wrap: balance;
+  }
+  h1 em { font-style: normal; color: var(--line); }
+  header .sub {
+    margin: 20px 0 0; font-size: clamp(17px, 2.1vw, 20px); font-weight: 300;
+    color: var(--muted); max-width: 38ch; line-height: 1.6;
+  }
+
+  /* ── 히어로: 변환 자체를 보여준다 ──────── */
+  .swap {
+    margin: 40px 0 0; background: var(--card); border: 1px solid var(--rule);
+    border-radius: 4px; overflow: hidden;
+  }
+  .swap-row {
+    display: grid; grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr);
+    align-items: center; gap: 0;
+  }
+  .swap-cell { padding: 26px 28px; min-width: 0; }
+  .swap-cell + .swap-cell { border-left: 1px solid var(--rule); }
+  .swap small {
+    display: block; font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  .swap b {
+    display: block; font-family: var(--display); font-weight: 700;
+    font-size: clamp(24px, 4vw, 36px); letter-spacing: -0.03em; line-height: 1.15;
+  }
+  .arrow {
+    display: grid; place-items: center; align-self: stretch;
+    color: var(--line); font-size: 22px; font-weight: 700;
+    border-left: 1px solid var(--rule);
+  }
+
+  /* ── 안내판 ───────────────────────────── */
+  .board {
+    background: var(--card); border: 1px solid var(--rule); border-radius: 4px;
+    overflow-x: auto;
+  }
+  table { border-collapse: collapse; width: 100%; min-width: 540px; }
+  .board td, .board th { padding: 13px 18px; text-align: left; }
+  .board thead th {
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.05em; color: var(--muted);
+    border-bottom: 1px solid var(--rule); padding-top: 15px; padding-bottom: 11px;
+  }
+  .board tbody tr + tr td { border-top: 1px solid var(--rule); }
+  .at { font-weight: 600; font-size: 19px; letter-spacing: -0.02em; width: 88px; }
+  .rt {
+    display: inline-block; font-size: 12px; font-weight: 600; color: #fff;
+    background: var(--line-2); border-radius: 3px; padding: 2px 8px; white-space: nowrap;
+  }
+  .rt.g { background: var(--line); }
+  .dest b { display: block; font-weight: 500; }
+  .dest span { display: block; font-size: 13px; color: var(--muted); }
+  .when { text-align: right; color: var(--muted); font-size: 14px; white-space: nowrap; }
+
+  /* ── 수치 ─────────────────────────────── */
+  .figs {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 4px;
+    overflow: hidden;
+  }
+  .fig { background: var(--card); padding: 22px 20px; }
+  .fig b {
+    display: block; font-family: var(--display); font-weight: 900;
+    font-size: clamp(26px, 3.6vw, 34px); letter-spacing: -0.035em; line-height: 1.1;
+  }
+  .fig span { display: block; font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+  /* ── 함정 목록 ────────────────────────── */
+  .traps { display: grid; gap: 1px; background: var(--rule);
+           border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+  .trap {
+    background: var(--card); padding: 20px 22px;
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 20px;
+    align-items: start;
+  }
+  .trap h3 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .trap .hit {
+    font-family: var(--display); font-weight: 900; font-size: 20px;
+    color: var(--line); letter-spacing: -0.02em; white-space: nowrap;
+  }
+  .trap p { grid-column: 1 / -1; margin: 0; font-size: 14.5px; color: var(--muted);
+            line-height: 1.65; max-width: 74ch; }
+  .trap code {
+    font-family: var(--body); font-weight: 500; color: var(--ink);
+    background: var(--paper); border-radius: 3px; padding: 0 5px;
+  }
+
+  /* ── 구조 ─────────────────────────────── */
+  .stack { display: grid; gap: 10px; }
+  .mod {
+    background: var(--card); border: 1px solid var(--rule); border-radius: 4px;
+    padding: 16px 20px; display: grid;
+    grid-template-columns: 168px minmax(0, 1fr); gap: 6px 20px; align-items: baseline;
+  }
+  .mod b { font-weight: 600; font-size: 14.5px; }
+  .mod span { color: var(--muted); font-size: 14.5px; }
+
+  .note {
+    margin-top: 14px; padding: 16px 20px; border-left: 3px solid var(--warn);
+    background: var(--card); font-size: 14.5px; color: var(--muted); max-width: 74ch;
+  }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; }
+  ul.plain li { padding-left: 18px; position: relative; color: var(--muted);
+                font-size: 15px; max-width: 68ch; }
+  ul.plain li::before {
+    content: ""; position: absolute; left: 0; top: 11px;
+    width: 6px; height: 2px; background: var(--muted);
+  }
+  ul.plain li b { color: var(--ink); font-weight: 600; }
+
+  footer {
+    margin-top: 64px; padding-top: 26px; border-top: 1px solid var(--rule);
+    color: var(--muted); font-size: 14px;
+  }
+  a { color: var(--line); text-underline-offset: 3px; }
+  a:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--line); outline-offset: 3px; }
+
+  @media (max-width: 720px) {
+    .line { padding-left: 24px; }
+    .line::before { left: 3px; }
+    section::before { left: -24px; top: 58px; width: 10px; height: 10px; }
+    .swap-row { grid-template-columns: 1fr; }
+    .swap-cell + .swap-cell { border-left: none; border-top: 1px solid var(--rule); }
+    .arrow { border-left: none; padding: 6px 0; transform: rotate(90deg); }
+    .mod { grid-template-columns: 1fr; gap: 2px; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: opacity .15s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="kicker">개인 프로젝트 · 2026</span>
+    <h1>전 세계 대중교통을<br><em>한국어로</em> 찾는다</h1>
+    <p class="sub">현지 표기를 몰라도 됩니다. 63개국 368만 개 정류장.</p>
+
+    <div class="swap">
+      <div class="swap-row">
+        <div class="swap-cell">
+          <small>입력</small>
+          <b>신주쿠</b>
+        </div>
+        <div class="arrow" aria-hidden="true">→</div>
+        <div class="swap-cell">
+          <small>찾은 것</small>
+          <b>新宿 <span style="color:var(--muted);font-weight:500;font-size:.55em">도쿄도 교통국</span></b>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="line">
+    <section>
+      <h2>왜 만들었나</h2>
+      <p class="lede">
+        해외에서 대중교통 정보는 그 나라 말로만 되어 있습니다. 번역기는 정류장 이름을
+        엉뚱하게 옮기고, 지도 앱은 현지 표기를 알아야 검색이 됩니다. 그래서 한국어로
+        검색하면 현지 표기로 바꿔 찾고, 결과는 둘을 나란히 보여주도록 만들었습니다.
+        역에서 표지판과 그대로 맞춰볼 수 있게.
+      </p>
+
+      <div class="board" role="region" aria-label="도쿄 신주쿠 출발 안내 예시">
+        <table>
+          <caption class="visually-hidden" style="position:absolute;left:-9999px">
+            도에이 지하철 신주쿠역 출발 안내
+          </caption>
+          <thead>
+            <tr><th scope="col">시각</th><th scope="col">노선</th>
+                <th scope="col">행선지</th><th scope="col" style="text-align:right">출발</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="at num">13:17</td>
+              <td><span class="rt g">大江戸線</span></td>
+              <td class="dest"><b>히카리가오카</b><span>光が丘</span></td>
+              <td class="when num">3분 후</td>
+            </tr>
+            <tr>
+              <td class="at num">13:17</td>
+              <td><span class="rt">新宿線</span></td>
+              <td class="dest"><b>모토야와타</b><span>本八幡</span></td>
+              <td class="when num">3분 후</td>
+            </tr>
+            <tr>
+              <td class="at num">13:18</td>
+              <td><span class="rt g">大江戸線</span></td>
+              <td class="dest"><b>도초마에</b><span>都庁前</span></td>
+              <td class="when num">4분 후</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:14px;color:var(--muted);margin-top:12px">
+        노선 색은 제가 고르지 않았습니다. 교통국이 자기 데이터에 넣어둔 색입니다.
+        받아둔 피드의 86%가 가지고 있습니다.
+      </p>
+    </section>
+
+    <section>
+      <h2>규모</h2>
+      <p class="lede">Mobility Database에서 전 세계 GTFS 피드를 받아 하나의 검색 인덱스로 만듭니다.</p>
+      <div class="figs">
+        <div class="fig"><b class="num">3,688,773</b><span>정류장</span></div>
+        <div class="fig"><b class="num">2,721</b><span>운영사 피드</span></div>
+        <div class="fig"><b class="num">63</b><span>나라</span></div>
+        <div class="fig"><b class="num">1<span style="font-size:.5em">ms</span></b><span>검색 응답</span></div>
+      </div>
+      <p style="margin-top:18px">
+        내려받은 원본은 16GB입니다. 그중 <code style="font-family:var(--body);font-weight:500;background:var(--card);padding:0 5px;border-radius:3px">stop_times</code>가
+        431M행 28GB를 차지합니다. 이걸 전역으로 모으지 않는 것이 이 설계의 핵심입니다 —
+        정류장 하나는 피드 하나에만 속하므로, 검색으로 찾은 뒤 그 피드의 zip만 열면 됩니다.
+        전역 인덱스에는 정류장만 담아 533MB이고, 검색이 1ms 안에 끝납니다.
+      </p>
+    </section>
+
+    <section>
+      <h2>GTFS를 다루며 만난 것들</h2>
+      <p class="lede">
+        규격을 읽어서는 알 수 없고, 실제 피드를 세어봐야 나오는 것들입니다.
+        오른쪽 수치는 받아둔 피드에서 해당되는 비율입니다.
+      </p>
+      <div class="traps">
+        <div class="trap">
+          <h3>24시를 넘는 시각</h3>
+          <span class="hit">31%</span>
+          <p><code>25:30:00</code>은 다음날 01:30입니다. <code>HH:MM:SS</code>로 파싱하면
+          깨집니다. 자정 기준 초 단위 정수로만 다룹니다. 자정 직후에는 어제 운행일의
+          25시대 편성이 지금 출발하는 차이므로, 어제도 함께 조회합니다.</p>
+        </div>
+        <div class="trap">
+          <h3><code>calendar.txt</code>가 없는 피드</h3>
+          <span class="hit">37%</span>
+          <p>오늘 운행하는지는 <code>stop_times</code>만으로 알 수 없습니다. 요일 반복과
+          예외일을 합쳐야 나오는데, 3분의 1이 넘는 피드에 요일 반복 파일 자체가 없고
+          예외일만 있습니다.</p>
+        </div>
+        <div class="trap">
+          <h3>배차간격 기반 운행</h3>
+          <span class="hit">16%</span>
+          <p><code>frequencies.txt</code>를 쓰는 편성의 <code>stop_times</code>는 시각표가
+          아니라 패턴입니다. 한 정류장에서 2행이 실제 출발 85건으로 펼쳐집니다.
+          경로 탐색은 구체적인 운행이 있어야 탈 차를 고를 수 있어 직접 전개합니다.</p>
+        </div>
+        <div class="trap">
+          <h3>행선지가 비어 있음</h3>
+          <span class="hit">13%</span>
+          <p>시각만 있고 어디로 가는지가 없으면 쓸 수 없는 표가 됩니다. 그 편성의
+          <code>stop_sequence</code> 최댓값, 즉 종점 이름으로 채웁니다. 종점은 어떤
+          GTFS에도 반드시 있습니다.</p>
+        </div>
+        <div class="trap">
+          <h3>이름이 같은 정류장</h3>
+          <span class="hit">48%</span>
+          <p>인덱스 행의 절반이 (피드, 이름) 중복이었습니다. 거리를 재보니 95%가 500m
+          안 — 같은 교차로의 양방향이거나 한 역의 여러 승강장입니다. 묶어서 한 곳으로
+          보여주고 시간표는 합칩니다. 나머지 5%는 이름만 같은 다른 장소라 나눕니다.</p>
+        </div>
+        <div class="trap">
+          <h3>고정폭 공백 패딩</h3>
+          <span class="hit">95 / 137,715</span>
+          <p>Renfe Cercanías는 <code>route_id</code>를 공백으로 채워 내보냅니다.
+          <code>"60T0002C1"</code>과 <code>"10T0001C1&nbsp;&nbsp;"</code>. 조인이
+          137,715건 중 95건만 맞아 노선 정보가 통째로 사라졌습니다.</p>
+        </div>
+        <div class="trap">
+          <h3>국가 표기가 틀림</h3>
+          <span class="hit">222건</span>
+          <p>국경을 걸치는 피드는 <code>locations</code>에 이웃 나라가 섞입니다.
+          355,497개짜리 독일 전국 피드가 프랑스로 잡혀 있었습니다. 국가가 하나뿐인
+          피드로 좌표 격자를 만들고 나머지는 자기 정류장 좌표로 투표하게 했습니다.</p>
+        </div>
+        <div class="trap">
+          <h3>악센트가 접히지 않음</h3>
+          <span class="hit">FTS5</span>
+          <p>SQLite의 <code>unicode61</code>은 <code>remove_diacritics 2</code>를 줘도
+          그리스어 악센트를 지우지 못합니다. <code>Σύνταγμα</code>로
+          <code>ΣΥΝΤΑΓΜΑ</code>가 안 걸립니다. 직접 접어 별도 열로 색인해
+          그리스어·베트남어·폴란드어·터키어를 함께 해결했습니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>경로 탐색</h2>
+      <p class="lede">
+        출발 안내판에서 “A에서 B까지”로 넓힐 때, RAPTOR를 씁니다. 라운드 k가
+        “k번 타고 갈 때의 최단 도착”이라 환승 횟수별 최적해가 한 번의 탐색으로 같이 나옵니다.
+      </p>
+      <ul class="plain">
+        <li><b>패턴 단위로 돕니다.</b> 헬싱키는 편성이 385,428개지만 정차 순서로 묶으면
+          패턴이 1,167개라 스캔 대상이 300배 줄어듭니다. 시각표 펼치기 1.5초, 탐색 6~9ms.</li>
+        <li><b>피드 경계를 넘습니다.</b> 도쿄에서 버스와 지하철은 다른 피드에 있습니다.
+          구역에 걸친 피드를 좌표로 이어 하나의 망으로 봅니다. 신주쿠에서 시부야까지
+          피드 12개를 묶어 26분에 나옵니다.</li>
+        <li><b>걸어도 되는 거리를 고릅니다.</b> 환승을 줄이려면 더 걸어야 할 때가 있습니다.
+          신주쿠에서 350m 한도면 지하철 한 정거장 + 환승 1회, 500m면 10분 걸어서 환승 0회 —
+          둘 다 26분입니다.</li>
+        <li><b>환승이 적다고 몇 시간 뒤 차를 올리지 않습니다.</b> 실제로 헬싱키에서
+          “환승 2회 941분 / 환승 3회 85분”이 함께 나왔습니다. 가장 이른 도착보다 45분
+          넘게 늦는 후보는 버립니다.</li>
+      </ul>
+      <div class="note">
+        <b>다만 긴 소요시간 자체는 정상입니다.</b> 어느 정류장은 오늘 버스가 두 대뿐이라
+        458분이 진짜 최적해였습니다. 처음엔 이걸 버그로 의심하고 알고리즘을 뒤졌습니다.
+      </div>
+    </section>
+
+    <section>
+      <h2>구조</h2>
+      <p class="lede">Python · SQLite FTS5 · DuckDB · Flask · React + Vite</p>
+      <div class="stack">
+        <div class="mod"><b>fetch_gtfs.py</b><span>전 세계 GTFS 수집. 페이지네이션, 이어받기, 용량 확인</span></div>
+        <div class="mod"><b>build_index.py</b><span>정류장 368만 개를 FTS5 하나로. 좌표 격자, 국가 판정, 정규화 색인</span></div>
+        <div class="mod"><b>gtfs.py</b><span>피드 하나의 시간표. 위 함정들을 처리하는 곳</span></div>
+        <div class="mod"><b>router.py</b><span>RAPTOR 경로 탐색. 패턴 압축, 도보 환승, 다중 피드</span></div>
+        <div class="mod"><b>translate.py</b><span>한국어 ↔ 현지 표기. 화면에 뜨는 것만 번역하고 영구 캐싱</span></div>
+      </div>
+      <p style="margin-top:18px">
+        핵심 모듈은 각자 실제 피드로 자기를 검사합니다. 그중 하나는
+        <b>출발 안내판과 경로 탐색을 서로 대조</b>합니다 — 같은 일을 SQL과 파이썬으로
+        따로 구현했으므로, 두 결과가 어긋나면 둘 중 하나가 틀린 것입니다.
+      </p>
+    </section>
+
+    <section>
+      <h2>알려진 한계</h2>
+      <p class="lede">데이터가 없는 것과 만들지 않은 것을 구분해서 적습니다.</p>
+      <ul class="plain">
+        <li><b>한국은 Mobility Database에 없습니다.</b> 데이터가 없는 게 아니라 GTFS가
+          아닐 뿐입니다. TAGO가 전국 버스 정보를 공개하지만 시각표가 아니라 배차간격을
+          줍니다. 변환기를 만들어 두었고, 정류장 간 소요시간은 좌표로 추정하며 그 사실을
+          데이터에 적어 둡니다.</li>
+        <li><b>일본 철도 대부분은 공개되지 않습니다.</b> JR은 어느 경로로도 GTFS를 내지
+          않습니다. 도쿄 기준으로는 버스 전체와 도에이 지하철까지가 현재 범위입니다.</li>
+        <li><b>도보 구간은 직선 거리입니다.</b> 실제 보행로가 아닙니다.</li>
+        <li><b>처음 보는 이름의 번역은 5~8초 걸립니다.</b> 한 번 번역하면 영구 캐싱되어
+          이후에는 즉시 나옵니다.</li>
+      </ul>
+    </section>
+  </div>
+
+  <footer>
+    데이터 출처 —
+    <a href="https://mobilitydatabase.org/">Mobility Database</a>,
+    <a href="https://developer.odpt.org/">공공교통 오픈데이터센터</a>,
+    <a href="https://www.data.go.kr/">공공데이터포털</a>
+  </footer>
+</div>
+
+</body>
+</html>
