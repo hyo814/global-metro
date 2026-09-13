@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "./api";
 import type { Board, Route, Stop } from "./api";
 import BoardPanel, { Empty } from "./components/Board";
+import Splash from "./components/Splash";
 import JourneyPanel from "./components/Journey";
 
 const regionName = (() => {
@@ -50,8 +51,16 @@ export default function App() {
   const [walk, setWalk] = useState(500);   // m. 걸어도 되는 거리
   const run = useRef(0); // 늦게 온 응답이 최신 결과를 덮지 않도록
 
+  const [booted, setBooted] = useState(false);
   useEffect(() => {
-    api.countries().then(setPlaces).catch(() => setPlaces([]));
+    const t0 = Date.now();
+    // 국가 목록이 오면 들어간다. 너무 빨리 오면 깜빡여 보이므로 잠깐만 잡아둔다.
+    api.countries().then(setPlaces).catch(() => setPlaces([])).finally(() => {
+      setTimeout(() => setBooted(true), Math.max(0, 650 - (Date.now() - t0)));
+    });
+    // API가 멎어도 여기서 막히면 안 된다
+    const hard = setTimeout(() => setBooted(true), 5000);
+    return () => clearTimeout(hard);
   }, []);
 
   // URL에 담긴 출발·도착지를 되살린다
@@ -184,7 +193,9 @@ export default function App() {
   const walks: [number, string][] = [[350, "적게"], [500, "보통"], [1200, "많이"]];
 
   return (
-    <div className="app">
+    <>
+      <Splash done={booted} />
+      <div className="app">
       <aside className="rail">
         <div className="brand">
           <b>어디로 가는 차</b>
@@ -275,6 +286,7 @@ export default function App() {
           <Empty onPick={(s) => { setActive("from"); setText((p) => ({ ...p, from: s })); }} />
         )}
       </main>
-    </div>
+      </div>
+    </>
   );
 }

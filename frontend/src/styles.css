@@ -29,6 +29,39 @@ body {
 
 .app { height: 100%; display: grid; grid-template-columns: 380px minmax(0, 1fr); }
 
+/* ── 들어갈 때 ────────────────────────────────── */
+.splash {
+  position: fixed; inset: 0; z-index: 20; background: var(--board);
+  display: grid; place-items: center; padding: 24px;
+}
+.splash.out { opacity: 0; pointer-events: none; }
+.splash-in { text-align: center; display: grid; gap: 22px; justify-items: center; }
+.splash .mark {
+  font-size: 15px; font-weight: 600; color: var(--chalk-dim); letter-spacing: 0.01em;
+}
+.splash .swap {
+  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  justify-content: center;
+}
+.splash .ko, .splash .orig {
+  font-size: clamp(34px, 9vw, 52px); font-weight: 600; letter-spacing: -0.04em;
+  color: var(--chalk); line-height: 1.1;
+}
+.splash .orig { color: var(--chalk-dim); }
+.splash .to { font-size: clamp(20px, 5vw, 28px); color: var(--chalk-dim); font-weight: 300; }
+.splash p { margin: 0; font-size: 14px; color: var(--chalk-dim); max-width: 30ch; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .splash { transition: opacity .32s ease; }
+  /* 원어가 뒤늦게 자리를 잡는다 — 이 앱이 하는 일 그대로 */
+  .splash .orig { animation: settle .5s ease .18s backwards; }
+  .splash .to { animation: settle .4s ease .1s backwards; }
+  @keyframes settle {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
 /* ── 검색 ─────────────────────────────────────── */
 .rail { background: var(--rail); display: flex; flex-direction: column; min-height: 0; }
 
