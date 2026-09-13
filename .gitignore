@@ -1,0 +1,5 @@
+.env
+gtfs/
+__pycache__/
+.cache/
+.omc/
