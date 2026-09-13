@@ -1,6 +1,5 @@
 {
-  "name": "어디로 가는 차",
-  "short_name": "어디로",
+  "name": "어디로",
   "description": "전 세계 대중교통을 한국어로. 63개국 368만 개 정류장.",
   "lang": "ko",
   "start_url": "/",

@@ -16,7 +16,7 @@ export default function Splash({ done }: { done: boolean }) {
   return (
     <div className={`splash${done ? " out" : ""}`} aria-hidden={done}>
       <div className="splash-in">
-        <b className="mark">어디로 가는 차</b>
+        <b className="mark">어디로</b>
         <dl className="pairs" aria-label="한국어로 치면 현지 표기로 찾습니다">
           {PAIRS.map(([ko, orig], i) => (
             <div key={ko} style={{ ["--i" as string]: i }}>

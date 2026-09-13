@@ -198,7 +198,7 @@ export default function App() {
       <div className="app">
       <aside className="rail">
         <div className="brand">
-          <b>어디로 가는 차</b>
+          <b>어디로</b>
           <span>전 세계 대중교통 출발 안내</span>
         </div>
 
