@@ -42,6 +42,43 @@ export const countries = () => get<{ code: string; feeds: number }[]>("/api/coun
 export const searchStops = (q: string, country: string) =>
   get<Stop[]>(`/api/stops?q=${encodeURIComponent(q)}&country=${encodeURIComponent(country)}`);
 
+export type Leg = {
+  mode: "walk" | "ride";
+  from: string; from_ko: string;
+  to: string; to_ko: string;
+  minutes: number;
+  route?: string;
+  headsign?: string; headsign_ko?: string;
+  depart?: string; arrive?: string;
+  stops?: number;
+};
+
+export type Plan = {
+  legs: Leg[];
+  transfers: number;
+  depart: string;
+  arrive: string;
+  minutes: number;
+  max_wait: number;
+};
+
+export type Route = {
+  agency: string; timezone: string; local_time: string;
+  plans: Plan[];
+  error?: string;
+};
+
+export const stopById = (feedId: string, stopId: string) =>
+  get<Stop>(
+    `/api/stop?feed_id=${encodeURIComponent(feedId)}&stop_id=${encodeURIComponent(stopId)}`,
+  );
+
+export const findRoute = (feedId: string, from: string, to: string) =>
+  get<Route>(
+    `/api/route?feed_id=${encodeURIComponent(feedId)}` +
+      `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+  );
+
 export const board = (feedId: string, stopId: string) =>
   get<Board>(
     `/api/departures?feed_id=${encodeURIComponent(feedId)}&stop_id=${encodeURIComponent(stopId)}`,

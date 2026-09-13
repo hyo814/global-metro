@@ -16,7 +16,7 @@ from functools import lru_cache
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from build_index import countries, feed_info, search
+from build_index import countries, feed_info, search, stop_by_id
 from gtfs import Feed, hhmm, secs
 from router import Timetable
 from router import search as find_route
@@ -127,6 +127,19 @@ def stops():
                                  -r["trips"], len(r["stop_name"])))
         rows = pool[:25]
     return jsonify(with_korean(rows, "stop_name", "agency"))
+
+
+@app.get("/api/stop")
+def one_stop():
+    """feed_id + stop_id로 정류장 하나. URL에 담아둔 출발·도착지를 되살릴 때 쓴다."""
+    feed_id = request.args.get("feed_id", "").strip()
+    stop_id = request.args.get("stop_id", "").strip()
+    if not (feed_id and stop_id):
+        return jsonify({"error": "feed_id와 stop_id가 필요합니다"}), 400
+    row = stop_by_id(feed_id, stop_id)
+    if not row:
+        return jsonify({"error": "없는 정류장입니다"}), 404
+    return jsonify(with_korean([row], "stop_name", "agency")[0])
 
 
 @app.get("/api/departures")

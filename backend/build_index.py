@@ -210,6 +210,21 @@ def search(q, country="", limit=20):
              "trips": int(r[8] or 0)} for r in rows]
 
 
+def stop_by_id(feed_id, stop_id):
+    """search()와 같은 모양의 dict 하나. URL 복원용."""
+    r = _con().execute("""
+        SELECT s.name, s.feed_id, s.stop_id, s.lat, s.lon, s.is_station,
+               f.agency, f.country, s.trips
+        FROM stops s LEFT JOIN feeds f ON f.feed_id = s.feed_id
+        WHERE s.feed_id = ? AND s.stop_id = ? LIMIT 1
+    """, (feed_id, stop_id)).fetchone()
+    if r is None:
+        return None
+    return {"stop_name": r[0], "feed_id": r[1], "stop_id": r[2],
+            "lat": r[3], "lon": r[4], "is_station": r[5] == "1",
+            "agency": r[6] or "", "country": r[7] or "", "trips": int(r[8] or 0)}
+
+
 def feed_info(feed_id):
     """feed_id -> zip 경로와 운영사 정보. 없으면 None."""
     r = _con().execute(

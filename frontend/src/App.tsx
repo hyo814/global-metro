@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as api from "./api";
-import type { Board, Stop } from "./api";
+import type { Board, Route, Stop } from "./api";
 import BoardPanel, { Empty } from "./components/Board";
+import JourneyPanel from "./components/Journey";
 
 const regionName = (() => {
   let f: Intl.DisplayNames | undefined;
@@ -19,117 +20,146 @@ const regionName = (() => {
   };
 })();
 
+type Slot = "from" | "to";
+const shown = (s: Stop) => s.stop_name_ko || s.stop_name;
+const pack = (s: Stop) => `${s.feed_id}|${s.stop_id}`;
+
 /** URL이 상태다. 새로고침해도, 링크를 보내도 그대로 열린다. */
 function readUrl() {
   const p = new URLSearchParams(location.search);
-  return {
-    q: p.get("q") ?? "",
-    country: p.get("country") ?? "",
-    feed: p.get("feed") ?? "",
-    stop: p.get("stop") ?? "",
-  };
+  return { from: p.get("from") ?? "", to: p.get("to") ?? "", country: p.get("country") ?? "" };
 }
-
-function writeUrl(patch: Record<string, string>, push = false) {
+function writeUrl(patch: Record<string, string>) {
   const p = new URLSearchParams(location.search);
   for (const [k, v] of Object.entries(patch)) v ? p.set(k, v) : p.delete(k);
-  const url = p.toString() ? `?${p}` : location.pathname;
-  push ? history.pushState({}, "", url) : history.replaceState({}, "", url);
+  history.replaceState({}, "", p.toString() ? `?${p}` : location.pathname);
 }
 
 export default function App() {
   const start = useRef(readUrl()).current;
-  const [q, setQ] = useState(start.q);
   const [country, setCountry] = useState(start.country);
   const [places, setPlaces] = useState<{ code: string; feeds: number }[]>([]);
+  const [text, setText] = useState<Record<Slot, string>>({ from: "", to: "" });
+  const [stop, setStop] = useState<Record<Slot, Stop | null>>({ from: null, to: null });
+  const [active, setActive] = useState<Slot>("from");
   const [hits, setHits] = useState<Stop[]>([]);
   const [busy, setBusy] = useState(false);
-  const [picked, setPicked] = useState<Stop | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
+  const [route, setRoute] = useState<Route | null>(null);
   const run = useRef(0); // 늦게 온 응답이 최신 결과를 덮지 않도록
 
   useEffect(() => {
     api.countries().then(setPlaces).catch(() => setPlaces([]));
   }, []);
 
-  const search = useCallback(
-    async (text: string, cc: string, restore?: { feed: string; stop: string }) => {
-      const mine = ++run.current;
-      if (!text.trim()) {
-        setHits([]);
-        setPicked(null);
-        return;
-      }
-      setBusy(true);
-      let rows: Stop[] = [];
-      try {
-        rows = await api.searchStops(text, cc);
-      } catch {
-        rows = [];
-      }
-      if (mine !== run.current) return;
-      setHits(rows);
-      setBusy(false);
+  // URL에 담긴 출발·도착지를 되살린다
+  useEffect(() => {
+    (["from", "to"] as Slot[]).forEach((k) => {
+      const raw = start[k];
+      if (!raw.includes("|")) return;
+      const [feed, id] = raw.split("|");
+      api.stopById(feed, id).then((s) => {
+        setStop((p) => ({ ...p, [k]: s }));
+        setText((p) => ({ ...p, [k]: shown(s) }));
+      }).catch(() => undefined);
+    });
+  }, [start]);
 
-      if (restore) {
-        const found = rows.find((r) => r.feed_id === restore.feed && r.stop_id === restore.stop);
-        if (found) void open(found, false);
-      }
-
-      // 번역은 화면을 그린 뒤에 채운다
-      const missing = rows.filter((r) => !r.stop_name_ko).map((r) => r.stop_name);
-      const got = await api.translate(missing);
-      if (mine !== run.current || !Object.keys(got).length) return;
-      setHits((prev) =>
-        prev.map((r) => (got[r.stop_name] ? { ...r, stop_name_ko: got[r.stop_name] } : r)),
-      );
-    },
-    [],
-  );
-
-  const open = useCallback(async (stop: Stop, push = true) => {
-    setPicked(stop);
-    setBoard(null);
-    writeUrl({ feed: stop.feed_id, stop: stop.stop_id }, push);
-    let data: Board;
-    try {
-      data = await api.board(stop.feed_id, stop.stop_id);
-    } catch {
-      data = { agency: "", timezone: "", country: "", local_time: "", departures: [],
-               error: "시간표를 불러오지 못했습니다." };
+  const search = useCallback(async (q: string, cc: string) => {
+    const mine = ++run.current;
+    if (!q.trim()) {
+      setHits([]);
+      return;
     }
-    setBoard(data);
+    setBusy(true);
+    let rows: Stop[] = [];
+    try {
+      rows = await api.searchStops(q, cc);
+    } catch {
+      rows = [];
+    }
+    if (mine !== run.current) return;
+    setHits(rows);
+    setBusy(false);
 
-    const missing = data.departures.flatMap((r) => [r.headsign, r.route]);
-    const got = await api.translate(missing);
-    if (!Object.keys(got).length) return;
-    setBoard((prev) =>
-      prev === data
-        ? {
-            ...prev,
-            departures: prev.departures.map((r) => ({
-              ...r,
-              headsign_ko: got[r.headsign] ?? r.headsign_ko,
-              route_ko: got[r.route] ?? r.route_ko,
-            })),
-          }
-        : prev,
+    const got = await api.translate(rows.filter((r) => !r.stop_name_ko).map((r) => r.stop_name));
+    if (mine !== run.current || !Object.keys(got).length) return;
+    setHits((prev) =>
+      prev.map((r) => (got[r.stop_name] ? { ...r, stop_name_ko: got[r.stop_name] } : r)),
     );
   }, []);
 
-  // 첫 진입: URL에 있던 검색과 정류장을 되살린다
+  // 타이핑이 멈추면 활성 칸으로 검색
+  const q = text[active];
   useEffect(() => {
-    if (start.q) void search(start.q, start.country, { feed: start.feed, stop: start.stop });
-  }, [search, start]);
-
-  // 타이핑이 멈추면 검색
-  useEffect(() => {
-    writeUrl({ q, country });
-    if (q === start.q && !hits.length && !q) return;
+    if (stop[active] && shown(stop[active]!) === q) return; // 고른 직후엔 다시 찾지 않는다
     const t = setTimeout(() => void search(q, country), 230);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, country]);
+  }, [q, country, active]);
+
+  useEffect(() => {
+    writeUrl({
+      country,
+      from: stop.from ? pack(stop.from) : "",
+      to: stop.to ? pack(stop.to) : "",
+    });
+  }, [country, stop]);
+
+  // 한쪽만 골랐으면 출발 안내판, 둘 다 골랐으면 길찾기
+  useEffect(() => {
+    const { from, to } = stop;
+    setBoard(null);
+    setRoute(null);
+    if (from && to) {
+      if (from.feed_id !== to.feed_id) return;
+      let alive = true;
+      api.findRoute(from.feed_id, from.stop_id, to.stop_id)
+        .then((r) => alive && setRoute(r))
+        .catch(() => alive && setRoute({ agency: "", timezone: "", local_time: "",
+          plans: [], error: "길을 불러오지 못했습니다." }));
+      return () => { alive = false; };
+    }
+    const one = from ?? to;
+    if (!one) return;
+    let alive = true;
+    api.board(one.feed_id, one.stop_id)
+      .then(async (d) => {
+        if (!alive) return;
+        setBoard(d);
+        const got = await api.translate(d.departures.flatMap((r) => [r.headsign, r.route]));
+        if (!alive || !Object.keys(got).length) return;
+        setBoard((prev) =>
+          prev && prev === d
+            ? { ...prev, departures: prev.departures.map((r) => ({
+                ...r,
+                headsign_ko: got[r.headsign] ?? r.headsign_ko,
+                route_ko: got[r.route] ?? r.route_ko,
+              })) }
+            : prev,
+        );
+      })
+      .catch(() => alive && setBoard({ agency: "", timezone: "", country: "",
+        local_time: "", departures: [], error: "시간표를 불러오지 못했습니다." }));
+    return () => { alive = false; };
+  }, [stop]);
+
+  const choose = (s: Stop) => {
+    setStop((p) => ({ ...p, [active]: s }));
+    setText((p) => ({ ...p, [active]: shown(s) }));
+    setHits([]);
+    if (active === "from" && !stop.to) setActive("to");
+  };
+
+  const clear = (k: Slot) => {
+    setStop((p) => ({ ...p, [k]: null }));
+    setText((p) => ({ ...p, [k]: "" }));
+    setActive(k);
+  };
+
+  const fields: [Slot, string][] = [["from", "출발"], ["to", "도착"]];
+  const both = stop.from && stop.to;
+  const mismatch = both && stop.from!.feed_id !== stop.to!.feed_id;
 
   return (
     <div className="app">
@@ -140,14 +170,25 @@ export default function App() {
         </div>
 
         <div className="find">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="정류장 이름 (한국어로도 됩니다)"
-            aria-label="정류장 검색"
-            autoComplete="off"
-            autoFocus
-          />
+          {fields.map(([k, tag]) => (
+            <label key={k} className={`field${active === k ? " on" : ""}`}>
+              <span className="tag">{tag}</span>
+              <input
+                value={text[k]}
+                onChange={(e) => setText((p) => ({ ...p, [k]: e.target.value }))}
+                onFocus={() => setActive(k)}
+                placeholder={k === "from" ? "정류장 (한국어로도 됩니다)" : "도착지 — 비우면 출발 안내판"}
+                aria-label={tag}
+                autoComplete="off"
+                autoFocus={k === "from"}
+              />
+              {stop[k] && (
+                <button type="button" onClick={() => clear(k)} aria-label={`${tag} 지우기`}>
+                  ×
+                </button>
+              )}
+            </label>
+          ))}
           <select value={country} onChange={(e) => setCountry(e.target.value)} aria-label="국가">
             <option value="">모든 나라</option>
             {places.map((c) => (
@@ -169,12 +210,11 @@ export default function App() {
               className="hit"
               tabIndex={0}
               role="button"
-              aria-current={picked === r}
-              onClick={() => void open(r)}
+              onClick={() => choose(r)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  void open(r);
+                  choose(r);
                 }
               }}
             >
@@ -193,7 +233,18 @@ export default function App() {
       </aside>
 
       <main className="board">
-        {picked ? <BoardPanel stop={picked} data={board} /> : <Empty onPick={setQ} />}
+        {mismatch ? (
+          <p className="status">
+            출발과 도착이 서로 다른 운영사의 자료에 있습니다. 길찾기는 같은 운영사 안에서만
+            됩니다 — 두 곳을 같은 운영사로 맞춰 주세요.
+          </p>
+        ) : both ? (
+          <JourneyPanel from={stop.from!} to={stop.to!} data={route} />
+        ) : stop.from || stop.to ? (
+          <BoardPanel stop={(stop.from ?? stop.to)!} data={board} />
+        ) : (
+          <Empty onPick={(s) => { setActive("from"); setText((p) => ({ ...p, from: s })); }} />
+        )}
       </main>
     </div>
   );
