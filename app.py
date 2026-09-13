@@ -66,16 +66,20 @@ def stops():
     # 한글로 검색하면 인덱스(현지 표기)에 걸리지 않는다. 현지 표기 후보로 바꿔
     # 다시 찾는다. 이게 이 앱을 만든 이유라서 폴백이 아니라 본 경로에 가깝다.
     if not rows:
-        seen = set()
-        for cand in to_original(q):
+        cands = to_original(q)[:4]
+        seen, pool = set(), []
+        for cand in cands:
+            # 후보별로 끊지 않고 전부 모은다. 한 후보가 25칸을 다 먹으면
+            # 더 정확한 뒤쪽 후보("新宿" 다음의 "新宿駅")가 검색조차 안 된다.
             for r in search(cand, country, limit=25):
                 key = (r["feed_id"], r["stop_id"])
                 if key not in seen:
                     seen.add(key)
-                    rows.append(r)
-            if len(rows) >= 25:
-                break
-        rows = rows[:25]
+                    pool.append(r)
+        low = {c.casefold() for c in cands}
+        pool.sort(key=lambda r: (r["stop_name"].casefold() not in low,
+                                 -r["net"], len(r["stop_name"])))
+        rows = pool[:25]
     return jsonify(with_korean(rows, "stop_name", "agency"))
 
 

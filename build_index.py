@@ -94,7 +94,7 @@ def build(zips, country):
         PRAGMA journal_mode=OFF;
         PRAGMA synchronous=OFF;
         CREATE TABLE feeds (feed_id TEXT PRIMARY KEY, zip TEXT, agency TEXT,
-                            timezone TEXT, country TEXT);
+                            timezone TEXT, country TEXT, n_stops INTEGER);
         -- 한 테이블에 다 넣는다. 조인도 동기화도 없다.
         CREATE VIRTUAL TABLE stops USING fts5(
             name, feed_id UNINDEXED, stop_id UNINDEXED,
@@ -134,9 +134,12 @@ def build(zips, country):
             skipped += 1
             continue
 
-        con.execute("INSERT OR REPLACE INTO feeds VALUES (?,?,?,?,?)",
+        # 망 규모는 "얼마나 중요한 정류장인가"의 싼 대용치다. 정류장 5천 개짜리
+        # 도쿄 교통국의 '新宿'과 마을버스의 '新宿'을 같은 순위로 두면 안 된다.
+        con.execute("INSERT OR REPLACE INTO feeds VALUES (?,?,?,?,?,?)",
                     (feed_id, str(p), ag.get("agency_name") or "",
-                     ag.get("agency_timezone") or "", country.get(feed_id, "")))
+                     ag.get("agency_timezone") or "", country.get(feed_id, ""),
+                     len(batch)))
         con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?)", batch)
         n_stop += len(batch)
         n_feed += 1
@@ -174,14 +177,17 @@ def search(q, country="", limit=20):
     fts = '"' + q.strip().replace('"', '""') + '"*'
     rows = _con().execute("""
         SELECT s.name, s.feed_id, s.stop_id, s.lat, s.lon, s.is_station,
-               f.agency, f.country
+               f.agency, f.country, coalesce(f.n_stops, 0)
         FROM stops s LEFT JOIN feeds f ON f.feed_id = s.feed_id
         WHERE s.stops MATCH ? AND (? = '' OR f.country = ?)
-        ORDER BY rank, length(s.name) LIMIT ?
-    """, (fts, country, country, limit)).fetchall()
+        ORDER BY (s.name = ?) DESC,          -- 정확히 일치하는 이름이 먼저
+                 coalesce(f.n_stops, 0) DESC, -- 큰 망이 먼저
+                 rank, length(s.name)
+        LIMIT ?
+    """, (fts, country, country, q.strip(), limit)).fetchall()
     return [{"stop_name": r[0], "feed_id": r[1], "stop_id": r[2],
              "lat": r[3], "lon": r[4], "is_station": r[5] == "1",
-             "agency": r[6] or "", "country": r[7] or ""} for r in rows]
+             "agency": r[6] or "", "country": r[7] or "", "net": r[8]} for r in rows]
 
 
 def feed_info(feed_id):
