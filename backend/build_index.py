@@ -20,6 +20,7 @@ import math
 import pathlib
 import sqlite3
 import sys
+import unicodedata
 import time
 import zipfile
 
@@ -31,19 +32,26 @@ GTFS = ROOT / "gtfs"
 
 
 def feed_countries():
-    """feed_id -> 국가코드. API에서 한 번 받아 캐싱한다. 실패해도 진행한다."""
+    """feed_id -> 확정 국가코드. 후보가 여럿이면 ""(나중에 좌표로 정한다).
+
+    국경을 걸치는 피드는 locations에 이웃 나라가 섞여 들어온다. 355,497개짜리
+    "Public Transport Germany" 피드의 첫 location이 FR이라, 첫 번째만 쓰면
+    독일 전국 피드가 프랑스가 된다. 실제로 그렇게 되어 있었다.
+    """
     if META.exists():
-        return json.loads(META.read_text())
+        raw = json.loads(META.read_text())
+        return {k: (v[0] if len(v) == 1 else "") for k, v in raw.items()}
     try:
         from fetch_gtfs import get_access_token, fetch_feeds
         token = get_access_token()
-        out = {}
+        raw = {}
         for f in fetch_feeds(token):
-            locs = f.get("locations") or [{}]
-            out[f.get("id", "")] = locs[0].get("country_code") or ""
+            cc = sorted({l.get("country_code") for l in (f.get("locations") or [])
+                         if l.get("country_code")})
+            raw[f.get("id", "")] = cc
         META.parent.mkdir(parents=True, exist_ok=True)
-        META.write_text(json.dumps(out))
-        return out
+        META.write_text(json.dumps(raw, ensure_ascii=False))
+        return {k: (v[0] if len(v) == 1 else "") for k, v in raw.items()}
     except Exception as e:
         print(f"  국가 정보 생략 ({type(e).__name__}: {e})", file=sys.stderr)
         return {}
@@ -108,8 +116,10 @@ def build(zips, country):
                             timezone TEXT, country TEXT, n_stops INTEGER,
                             la1 REAL, la2 REAL, lo1 REAL, lo2 REAL);
         -- 한 테이블에 다 넣는다. 조인도 동기화도 없다.
+        -- norm이 검색 대상, name은 보여주기용. 악센트와 대소문자를 접어 두면
+        -- Σύνταγμα로 ΣΥΝΤΑΓΜΑ를 찾을 수 있다.
         CREATE VIRTUAL TABLE stops USING fts5(
-            name, feed_id UNINDEXED, stop_id UNINDEXED,
+            norm, name UNINDEXED, feed_id UNINDEXED, stop_id UNINDEXED,
             lat UNINDEXED, lon UNINDEXED, is_station UNINDEXED,
             trips UNINDEXED,
             tokenize='unicode61');
@@ -154,7 +164,7 @@ def build(zips, country):
         for nm, group in by_name.items():
             for c in cluster(group):
                 # 묶인 정류장의 stop_id를 모두 들고 간다. 시간표는 전부 합쳐 보여준다.
-                batch.append((nm, feed_id, ",".join(x[0] for x in c),
+                batch.append((fold(nm), nm, feed_id, ",".join(x[0] for x in c),
                               c[0][1], c[0][2],
                               "1" if any(x[3] == "1" for x in c) else "0",
                               sum(calls[x[0]] for x in c)))
@@ -164,15 +174,15 @@ def build(zips, country):
 
         # 망 규모는 "얼마나 중요한 정류장인가"의 싼 대용치다. 정류장 5천 개짜리
         # 도쿄 교통국의 '新宿'과 마을버스의 '新宿'을 같은 순위로 두면 안 된다.
-        las = [float(x[3]) for x in batch if _num(x[3])]
-        los = [float(x[4]) for x in batch if _num(x[4])]
+        las = [float(x[4]) for x in batch if _num(x[4])]
+        los = [float(x[5]) for x in batch if _num(x[5])]
         con.execute("INSERT OR REPLACE INTO feeds VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (feed_id, str(p), ag.get("agency_name") or "",
                      ag.get("agency_timezone") or "", country.get(feed_id, ""),
                      len(batch),
                      min(las) if las else None, max(las) if las else None,
                      min(los) if los else None, max(los) if los else None))
-        con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?,?)", batch)
+        con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?,?,?)", batch)
         n_stop += len(batch)
         n_feed += 1
 
@@ -181,6 +191,7 @@ def build(zips, country):
             print(f"  {i}/{len(zips)} 피드 · 정류장 {n_stop:,}개 · {time.time()-t0:.0f}초")
 
     con.commit()
+    _vote_countries(con)
     print("  최적화 중…")
     con.execute("INSERT INTO stops(stops) VALUES('optimize')")
     con.commit()
@@ -208,6 +219,87 @@ def countries():
         "GROUP BY country ORDER BY 2 DESC")]
 
 
+# IANA 시간대 이름은 지명을 그대로 담고 있어서, 한 나라만 가리키는 것이 많다.
+# 그 나라에 "확실한" 피드가 하나도 없으면 좌표 투표가 성립하지 않는다. 태국은
+# 확정 피드가 0개라 방콕 정류장이 말레이시아로 넘어갔다. 그때 쓰는 최후 보정.
+TZ_COUNTRY = {
+    "Asia/Bangkok": "TH", "Asia/Singapore": "SG", "Asia/Hong_Kong": "HK",
+    "Asia/Seoul": "KR", "Asia/Tokyo": "JP", "Asia/Jakarta": "ID",
+    "Asia/Kolkata": "IN", "Asia/Jerusalem": "IL", "Asia/Manila": "PH",
+    "Asia/Taipei": "TW", "Asia/Kuala_Lumpur": "MY", "Asia/Ho_Chi_Minh": "VN",
+    "Asia/Dubai": "AE", "Asia/Tbilisi": "GE", "Asia/Yerevan": "AM",
+    "Europe/Athens": "GR", "Europe/Kyiv": "UA", "Europe/Kiev": "UA",
+    "Europe/Lisbon": "PT", "Europe/Madrid": "ES", "Europe/Rome": "IT",
+    "Europe/Warsaw": "PL", "Europe/Prague": "CZ", "Europe/Vienna": "AT",
+    "Europe/Zurich": "CH", "Europe/Brussels": "BE", "Europe/Amsterdam": "NL",
+    "Europe/Copenhagen": "DK", "Europe/Stockholm": "SE", "Europe/Oslo": "NO",
+    "Europe/Helsinki": "FI", "Europe/Dublin": "IE", "Europe/Istanbul": "TR",
+    "Pacific/Auckland": "NZ", "Africa/Nairobi": "KE", "Africa/Cairo": "EG",
+}
+
+
+def fix_by_timezone(con):
+    """시간대가 한 나라만 가리키는데 표기가 다르면 바로잡는다."""
+    fixed = []
+    for fid, tz, cc in con.execute(
+            "SELECT feed_id, timezone, country FROM feeds WHERE timezone <> ''"):
+        want = TZ_COUNTRY.get(tz)
+        if want and want != cc:
+            fixed.append((want, fid))
+    if fixed:
+        con.executemany("UPDATE feeds SET country=? WHERE feed_id=?", fixed)
+        con.commit()
+    return len(fixed)
+
+
+def _vote_countries(con):
+    """국가가 정해지지 않은 피드를 좌표로 정한다.
+
+    국가가 하나뿐인 피드(전체의 95%)로 "격자 -> 국가" 지도를 만들고, 남은
+    피드는 자기 정류장이 어느 칸에 있는지로 투표한다. 외부 자료 없이
+    가진 데이터만으로 국경을 근사한다.
+    """
+    grid, unknown = {}, []
+    cc_of = dict(con.execute("SELECT feed_id, country FROM feeds").fetchall())
+    for fid, cc in cc_of.items():
+        if not cc:
+            unknown.append(fid)
+    if not unknown:
+        return
+
+    rd = sqlite3.connect(f"file:{OUT}?mode=ro", uri=True)
+    mine = {}
+    for fid, la, lo in rd.execute("SELECT feed_id, lat, lon FROM stops"):
+        try:
+            cell = (int(float(la) // CELL), int(float(lo) // CELL))
+        except (TypeError, ValueError):
+            continue
+        cc = cc_of.get(fid) or ""
+        if cc:
+            g = grid.setdefault(cell, {})
+            g[cc] = g.get(cc, 0) + 1
+        else:
+            m = mine.setdefault(fid, {})
+            m[cell] = m.get(cell, 0) + 1
+    rd.close()
+
+    fixed = []
+    for fid, cells in mine.items():
+        votes = {}
+        for cell, n in cells.items():
+            for cc, w in grid.get(cell, {}).items():
+                votes[cc] = votes.get(cc, 0) + n
+        if votes:
+            fixed.append((max(votes, key=votes.get), fid))
+    if fixed:
+        con.executemany("UPDATE feeds SET country=? WHERE feed_id=?", fixed)
+        con.commit()
+    print(f"  국가 미정 {len(unknown)}개 중 {len(fixed)}개를 좌표로 판정")
+    n = fix_by_timezone(con)
+    if n:
+        print(f"  시간대와 어긋난 국가 표기 {n}개 바로잡음")
+
+
 def search(q, country="", limit=20, near=None):
     """접두 질의. 특수문자가 FTS5 구문을 깨지 않게 통째로 인용한다.
 
@@ -217,17 +309,18 @@ def search(q, country="", limit=20, near=None):
     """
     if not q.strip():
         return []
-    fts = '"' + q.strip().replace('"', '""') + '"*'
+    key = fold(q.strip())
+    fts = '"' + key.replace('"', '""') + '"*'
     rows = _con().execute("""
         SELECT s.name, s.feed_id, s.stop_id, s.lat, s.lon, s.is_station,
                f.agency, f.country, s.trips
         FROM stops s LEFT JOIN feeds f ON f.feed_id = s.feed_id
         WHERE s.stops MATCH ? AND (? = '' OR f.country = ?)
-        ORDER BY (s.name = ?) DESC,               -- 정확히 일치하는 이름이 먼저
+        ORDER BY (s.norm = ?) DESC,               -- 정확히 일치하는 이름이 먼저
                  CAST(s.trips AS INTEGER) DESC,   -- 차가 많이 서는 곳이 먼저
                  rank, length(s.name)
         LIMIT ?
-    """, (fts, country, country, q.strip(), limit * 4 if near else limit)).fetchall()
+    """, (fts, country, country, key, limit * 4 if near else limit)).fetchall()
     out = [{"stop_name": r[0], "feed_id": r[1], "stop_id": r[2],
             "lat": r[3], "lon": r[4], "is_station": r[5] == "1",
             "agency": r[6] or "", "country": r[7] or "",
@@ -260,6 +353,27 @@ def stop_by_id(feed_id, stop_id):
 
 
 CELL = 0.1          # 도. 약 11km 격자
+
+# 유니코드가 합자로 안 쪼개는 글자들. ł·ø·ß 같은 것은 악센트가 아니라
+# 별개 문자라서 정규화로는 안 없어진다.
+SPECIAL = str.maketrans({
+    "\u0142": "l", "\u0141": "L", "\u0111": "d", "\u0110": "D",
+    "\u00f8": "o", "\u00d8": "O", "\u00e6": "ae", "\u00c6": "AE",
+    "\u0153": "oe", "\u0152": "OE", "\u00df": "ss", "\u0131": "i",
+    "\u00f0": "d", "\u00d0": "D", "\u00fe": "th", "\u00de": "TH",
+})
+
+
+def fold(s):
+    """검색용 정규화. 악센트를 벗기고 대소문자를 없앤다.
+
+    FTS5의 unicode61은 remove_diacritics 2를 줘도 그리스어 악센트를 못 지운다
+    (Σύνταγμα가 ΣΥΝΤΑΓΜΑ에 안 걸린다). 그래서 직접 접는다. 베트남어·체코어·
+    폴란드어도 같은 문제다.
+    """
+    s = (s or "").translate(SPECIAL)
+    s = unicodedata.normalize("NFD", s)
+    return "".join(c for c in s if not unicodedata.combining(c)).casefold()
 
 
 def ensure_geo():

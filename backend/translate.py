@@ -95,6 +95,20 @@ def _call_api(texts):
         return {}
 
 
+def _first(name):
+    """다국어를 한 칸에 넣은 이름에서 앞부분만. "태국어;영어" 같은 형태가 있다.
+
+    그대로 번역하면 "모칫 2 버스터미널;모칫 2 버스터미널"처럼 같은 말이 두 번
+    나온다. 구분자 앞만 쓴다.
+    """
+    for sep in (";", "|"):
+        if sep in name:
+            head = name.split(sep, 1)[0].strip()
+            if head:
+                return head
+    return name
+
+
 def korean(texts, use_api=True):
     """원문 -> 한글. use_api=False면 캐시에 있는 것만 돌려준다.
 
@@ -105,9 +119,13 @@ def korean(texts, use_api=True):
     uniq = sorted({t.strip() for t in texts if t and t.strip()})
     if not uniq:
         return {}
+    # 번역은 구분자 앞부분만 하고, 결과는 원문 그대로를 열쇠로 돌려준다.
+    short = {t: _first(t) for t in uniq}
+    want = sorted(set(short.values()))
 
-    hit = cached(uniq)
-    missing = [t for t in uniq if t not in hit]
+    hit = {t: v for t in uniq
+           for v in [cached([short[t]]).get(short[t])] if v}
+    missing = [s for s in want if s not in {short[t]: hit[t] for t in hit}]
     if not missing or not use_api or not os.getenv("ANTHROPIC_API_KEY"):
         return hit
 
@@ -115,7 +133,11 @@ def korean(texts, use_api=True):
     if fresh:
         with _db() as con:
             con.executemany("INSERT OR REPLACE INTO ko VALUES (?, ?)", fresh.items())
-    return {**hit, **fresh}
+    out = dict(hit)
+    for t in uniq:
+        if short[t] in fresh:
+            out[t] = fresh[short[t]]
+    return out
 
 
 QUERY_SYSTEM = """사용자가 입력한 대중교통 정류장·역 이름을,

@@ -160,10 +160,18 @@ def stops():
 
         # 근접이 이름 일치보다 앞선다. 반대쪽 정류장이 도쿄에 있는데 나가노
         # 마을버스의 같은 이름 정류장이 위에 올 이유가 없다.
-        pool.sort(key=lambda r: (far(r),
-                                 r["stop_name"].casefold() not in low,
-                                 -specificity(r["stop_name"]),
-                                 -r["trips"], len(r["stop_name"])))
+        def rank(r):
+            exact = r["stop_name"].casefold() in low
+            # 둘 다 정확히 일치하면 구체성은 의미가 없다. "München Hauptbahnhof"와
+            # "München Hbf"는 같은 역의 두 표기인데, 이름이 길다는 이유로
+            # 하루 34대짜리가 6,002대짜리를 이겼다.
+            # 오늘 한 대도 안 서는 곳은 이름이 맞아도 뒤로. 홍콩에서 정차 0회인
+            # "Central"이 1위로 올라온 적이 있다.
+            return (far(r), r["trips"] == 0, not exact,
+                    0 if exact else -specificity(r["stop_name"]),
+                    -r["trips"], len(r["stop_name"]))
+
+        pool.sort(key=rank)
         rows = pool[:25]
     return jsonify(with_korean(rows, "stop_name", "agency"))
 
