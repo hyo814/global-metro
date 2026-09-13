@@ -8,6 +8,8 @@
     python3 build_index.py     # 먼저 인덱스 구축
     python3 app.py
 """
+import socket
+import threading
 from datetime import datetime
 from functools import lru_cache
 
@@ -25,6 +27,12 @@ app = Flask(__name__, static_folder="static")
 @lru_cache(maxsize=16)
 def feed_for(zip_path):
     return Feed(zip_path)
+
+
+# DuckDB 커넥션은 스레드 간 공유가 안전하지 않다. 시간표 조회만 직렬화한다.
+# 검색(SQLite)과 번역(HTTP)은 잠그지 않아서, 5초짜리 번역이 도는 동안에도
+# 화면이 멈추지 않는다.
+_feed_lock = threading.Lock()
 
 
 def with_korean(rows, *fields, use_api=False):
@@ -125,17 +133,32 @@ def departures():
 
     feed = feed_for(info["zip"])
     now = datetime.now(feed.tz)
+    with _feed_lock:
+        runs = feed.departures(stop_id, now=now)
     return jsonify({
         "agency": info["agency"],
         "timezone": info["timezone"],
         "country": info["country"],
         # 여행자는 다른 시간대에 있을 수 있다. "3분 후"가 어느 시계 기준인지 보여준다.
         "local_time": now.strftime("%H:%M"),
-        "departures": with_korean(feed.departures(stop_id, now=now), "route", "headsign"),
+        "departures": with_korean(runs, "route", "headsign"),
     })
 
 
+def lan_ip():
+    """같은 Wi-Fi의 폰에서 접속할 주소. 실제로 나가지는 않는 UDP 소켓으로 알아낸다."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
 if __name__ == "__main__":
-    # ponytail: threaded=False. 피드마다 DuckDB 커넥션 하나를 공유하므로
-    # 동시 요청이 위험하다. 다중 사용자가 필요해지면 요청마다 cursor()를 쓸 것.
-    app.run(port=5001, threaded=False)
+    print(f"\n  폰에서 열기:  http://{lan_ip()}:5001\n"
+          f"  같은 Wi-Fi에 있어야 합니다.\n")
+    # 0.0.0.0: 같은 네트워크의 다른 기기에서 접속할 수 있게 한다.
+    app.run(host="0.0.0.0", port=5001, threaded=True)

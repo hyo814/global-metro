@@ -40,15 +40,16 @@
     width: 100%; font: inherit; color: var(--ink); background: var(--paper);
     border: 1px solid var(--rule); border-radius: 7px; padding: 11px 13px;
   }
-  .find input { font-size: 16px; }
-  .find select { font-size: 14px; color: var(--muted); }
+  /* 16px 미만이면 iOS가 탭할 때 화면을 확대한다 */
+  .find input, .find select { font-size: 16px; }
+  .find select { color: var(--muted); }
   .find input:focus-visible, .find select:focus-visible {
     outline: 2px solid var(--ink); outline-offset: 1px; background: var(--board);
   }
 
   .hits { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1;
           border-top: 1px solid var(--rule); }
-  .hit { padding: 12px 24px; cursor: pointer; border-bottom: 1px solid var(--rule);
+  .hit { padding: 14px 24px; cursor: pointer; border-bottom: 1px solid var(--rule);
          display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
   .hit:hover, .hit:focus-visible { background: var(--paper); outline: none; }
   .hit[aria-current='true'] { background: var(--paper);
