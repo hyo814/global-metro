@@ -35,45 +35,47 @@ body {
   display: grid; place-items: center; padding: 24px;
 }
 .splash.out { opacity: 0; pointer-events: none; }
-.splash-in { display: grid; gap: 26px; justify-items: center; }
-.splash .mark {
-  font-size: 15px; font-weight: 600; color: var(--chalk-dim); letter-spacing: 0.01em;
-}
+.splash-in { display: grid; gap: 4px; justify-items: center; text-align: center; }
 
-/* 왼쪽은 한국어, 오른쪽은 현지 표기. 가운데 선이 그 경계다. */
-.pairs { margin: 0; display: grid; gap: 12px; }
-.pairs > div {
-  display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
-  align-items: baseline; gap: 0 20px;
+.walk { width: min(300px, 78vw); height: auto; margin-bottom: 10px; }
+.walk .route {
+  fill: none; stroke: var(--chalk-dim); stroke-width: 2;
+  stroke-linecap: round; opacity: .5;
 }
-.pairs > div::before {
-  content: ""; grid-column: 2; align-self: stretch; background: var(--board-2);
+.walk .stop { fill: var(--board); stroke: var(--chalk-dim); stroke-width: 2; }
+.walk .goal { fill: var(--board); stroke: var(--chalk); stroke-width: 3; }
+.walk .walker {
+  fill: none; stroke: var(--chalk); stroke-width: 2.4;
+  stroke-linecap: round; stroke-linejoin: round;
 }
-.pairs dt {
-  text-align: right; font-size: clamp(19px, 4.6vw, 27px); font-weight: 600;
-  letter-spacing: -0.03em; color: var(--chalk); line-height: 1.25;
+.walk .walker circle { fill: var(--chalk); stroke: none; }
+
+.splash .mark {
+  font-size: clamp(40px, 11vw, 58px); font-weight: 600; letter-spacing: -0.045em;
+  color: var(--chalk); line-height: 1.1;
 }
-.pairs dd {
-  margin: 0; font-size: clamp(19px, 4.6vw, 27px); font-weight: 400;
-  letter-spacing: -0.02em; color: var(--chalk-dim); line-height: 1.25;
-  overflow-wrap: anywhere;
-}
+.splash .mark .q { color: var(--chalk-dim); margin-left: 2px; }
 .splash p {
-  margin: 0; font-size: 13.5px; color: var(--chalk-dim); max-width: 34ch;
-  text-align: center; line-height: 1.7;
+  margin: 10px 0 0; font-size: 13.5px; color: var(--chalk-dim);
+  max-width: 32ch; line-height: 1.7;
 }
 
 @media (prefers-reduced-motion: no-preference) {
   .splash { transition: opacity .32s ease; }
-  /* 현지 표기가 뒤늦게 자리를 잡는다 — 이 앱이 하는 일 그대로 */
-  .pairs dd { animation: settle .46s ease calc(.12s + var(--i) * .09s) backwards; }
-  @keyframes settle {
-    from { opacity: 0; transform: translateY(5px); }
-    to { opacity: 1; transform: none; }
+  /* 한 번만, 짧게. 이 화면은 0.7초쯤 보인다. */
+  .walk .walker { animation: step .42s ease calc(var(--i) * .07s) backwards; }
+  .walk .goal { animation: pop .4s ease .26s backwards; }
+  @keyframes step {
+    from { opacity: 0; transform: translateX(-8px); }
+    to { opacity: 1; }
+  }
+  @keyframes pop {
+    from { opacity: 0; r: 3; }
+    to { opacity: 1; }
   }
 }
 
-/* ── 검색 ─────────────────────────────────────── */
+/* ── 검색 ─────────────────────────────────────── *//* ── 검색 ─────────────────────────────────────── */
 .rail { background: var(--rail); display: flex; flex-direction: column; min-height: 0; }
 
 .brand { padding: 26px 26px 18px; display: grid; gap: 2px; }
