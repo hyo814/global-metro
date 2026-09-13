@@ -12,9 +12,11 @@
 못 잡아서 탈락시켰다.
 """
 import argparse
+import collections
 import csv
 import io
 import json
+import math
 import pathlib
 import sqlite3
 import sys
@@ -45,6 +47,38 @@ def feed_countries():
         return {}
 
 
+def _dist(a, b):
+    """두 (lat, lon) 사이 대략 거리(m). 좌표가 없으면 None."""
+    try:
+        la1, lo1 = float(a[0]), float(a[1])
+        la2, lo2 = float(b[0]), float(b[1])
+    except (TypeError, ValueError):
+        return None
+    p1, p2 = math.radians(la1), math.radians(la2)
+    dp, dl = math.radians(la2 - la1), math.radians(lo2 - lo1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371000 * math.asin(math.sqrt(h))
+
+
+def cluster(stops, radius=500):
+    """이름이 같은 정류장들을 거리로 묶는다.
+
+    인덱스 행의 48%가 (피드, 이름) 중복이다. 대부분은 같은 교차로의 양방향
+    정류장이거나 한 역의 여러 승강장이라 검색 결과에서는 한 곳으로 보여야 한다.
+    다만 5%는 이름만 같고 수 km 떨어진 다른 장소라 그건 나눈다.
+    """
+    out = []
+    for s in stops:
+        for c in out:
+            d = _dist((s[1], s[2]), (c[0][1], c[0][2]))
+            if d is not None and d <= radius:
+                c.append(s)
+                break
+        else:
+            out.append([s])
+    return out
+
+
 def rows(z, name):
     if name not in z.namelist():
         return
@@ -61,11 +95,12 @@ def build(zips, country):
         PRAGMA journal_mode=OFF;
         PRAGMA synchronous=OFF;
         CREATE TABLE feeds (feed_id TEXT PRIMARY KEY, zip TEXT, agency TEXT,
-                            timezone TEXT, country TEXT);
+                            timezone TEXT, country TEXT, n_stops INTEGER);
         -- 한 테이블에 다 넣는다. 조인도 동기화도 없다.
         CREATE VIRTUAL TABLE stops USING fts5(
             name, feed_id UNINDEXED, stop_id UNINDEXED,
             lat UNINDEXED, lon UNINDEXED, is_station UNINDEXED,
+            trips UNINDEXED,
             tokenize='unicode61');
     """)
 
@@ -80,18 +115,49 @@ def build(zips, country):
             continue
 
         ag = next(rows(z, "agency.txt"), {}) or {}
-        batch = [(r.get("stop_name") or "", feed_id, r.get("stop_id") or "",
-                  r.get("stop_lat") or "", r.get("stop_lon") or "",
-                  "1" if r.get("location_type") == "1" else "0")
-                 for r in rows(z, "stops.txt") if (r.get("stop_name") or "").strip()]
+
+        # 정류장별 정차 횟수. 이게 "얼마나 중요한 정류장인가"의 진짜 신호다.
+        # 망 규모는 거꾸로 나올 때가 있다 — 大田原市(268개 망)의 新宿은 하루 10대,
+        # 東京都交通局(141개 망)의 新宿은 1,534대다.
+        calls = collections.Counter()
+        if "stop_times.txt" in z.namelist():
+            with z.open("stop_times.txt") as f:
+                rd = csv.reader(io.TextIOWrapper(f, "utf-8-sig", errors="replace"))
+                head = next(rd, [])
+                if "stop_id" in head:
+                    i = head.index("stop_id")
+                    for row in rd:
+                        if len(row) > i:
+                            calls[row[i]] += 1
+
+        by_name = {}
+        for r in rows(z, "stops.txt"):
+            nm = (r.get("stop_name") or "").strip()
+            if nm:
+                by_name.setdefault(nm, []).append(
+                    (r.get("stop_id") or "", r.get("stop_lat") or "",
+                     r.get("stop_lon") or "",
+                     "1" if r.get("location_type") == "1" else "0"))
+
+        batch = []
+        for nm, group in by_name.items():
+            for c in cluster(group):
+                # 묶인 정류장의 stop_id를 모두 들고 간다. 시간표는 전부 합쳐 보여준다.
+                batch.append((nm, feed_id, ",".join(x[0] for x in c),
+                              c[0][1], c[0][2],
+                              "1" if any(x[3] == "1" for x in c) else "0",
+                              sum(calls[x[0]] for x in c)))
         if not batch:
             skipped += 1
             continue
 
-        con.execute("INSERT OR REPLACE INTO feeds VALUES (?,?,?,?,?)",
+        # 망 규모는 "얼마나 중요한 정류장인가"의 싼 대용치다. 정류장 5천 개짜리
+        # 도쿄 교통국의 '新宿'과 마을버스의 '新宿'을 같은 순위로 두면 안 된다.
+        con.execute("INSERT OR REPLACE INTO feeds VALUES (?,?,?,?,?,?)",
                     (feed_id, str(p), ag.get("agency_name") or "",
-                     ag.get("agency_timezone") or "", country.get(feed_id, "")))
-        con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?)", batch)
+                     ag.get("agency_timezone") or "", country.get(feed_id, ""),
+                     len(batch)))
+        con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?,?)", batch)
         n_stop += len(batch)
         n_feed += 1
 
@@ -128,14 +194,18 @@ def search(q, country="", limit=20):
     fts = '"' + q.strip().replace('"', '""') + '"*'
     rows = _con().execute("""
         SELECT s.name, s.feed_id, s.stop_id, s.lat, s.lon, s.is_station,
-               f.agency, f.country
+               f.agency, f.country, s.trips
         FROM stops s LEFT JOIN feeds f ON f.feed_id = s.feed_id
         WHERE s.stops MATCH ? AND (? = '' OR f.country = ?)
-        ORDER BY rank, length(s.name) LIMIT ?
-    """, (fts, country, country, limit)).fetchall()
+        ORDER BY (s.name = ?) DESC,               -- 정확히 일치하는 이름이 먼저
+                 CAST(s.trips AS INTEGER) DESC,   -- 차가 많이 서는 곳이 먼저
+                 rank, length(s.name)
+        LIMIT ?
+    """, (fts, country, country, q.strip(), limit)).fetchall()
     return [{"stop_name": r[0], "feed_id": r[1], "stop_id": r[2],
              "lat": r[3], "lon": r[4], "is_station": r[5] == "1",
-             "agency": r[6] or "", "country": r[7] or ""} for r in rows]
+             "agency": r[6] or "", "country": r[7] or "",
+             "trips": int(r[8] or 0)} for r in rows]
 
 
 def feed_info(feed_id):

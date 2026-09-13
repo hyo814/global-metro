@@ -114,33 +114,49 @@ def korean(texts, use_api=True):
     return {**hit, **fresh}
 
 
-QUERY_SYSTEM = """사용자가 한국어로 입력한 대중교통 정류장·역 이름을,
+QUERY_SYSTEM = """사용자가 입력한 대중교통 정류장·역 이름을,
 현지에서 실제로 표기되는 형태의 후보로 바꿔라.
+입력은 한국어일 수도, 로마자일 수도, 영어 명칭일 수도 있다.
 
-- 가능한 표기를 모두 낸다. 일본이면 한자와 로마자 둘 다.
-  "신주쿠" -> ["新宿", "Shinjuku"]
+- 현지 문자로 쓴 형태를 반드시 포함한다.
+  "신주쿠" -> ["新宿", "新宿駅", "Shinjuku"]
+  "Shibuya" -> ["渋谷", "渋谷駅", "Shibuya"]
   "샤를드골" -> ["Charles de Gaulle", "Charles-de-Gaulle"]
-  "브리토마트" -> ["Britomart"]
-- 역·정류장 같은 접미사는 붙인 형태와 뗀 형태를 모두 낸다.
-  "도쿄역" -> ["東京駅", "東京", "Tokyo"]
+- 역·정류장 접미사는 붙인 형태와 뗀 형태를 모두 낸다.
+  "도쿄역" -> ["東京駅", "東京", "Tokyo Station"]
+- 입력이 이미 현지 표기면 그것도 후보에 넣는다.
 - 확실하지 않으면 그럴듯한 후보를 여러 개 낸다. 최대 6개.
 
-JSON 문자열 배열로만 답한다. 설명도 코드펜스도 붙이지 않는다."""
+어느 나라 지명인지도 함께 판단한다. 확실하지 않으면 country를 ""로 둔다.
+
+{"country": "JP", "names": ["新宿", "新宿駅", "Shinjuku"]} 형태의
+JSON 객체로만 답한다. country는 ISO 3166-1 alpha-2 두 글자다.
+설명도 코드펜스도 붙이지 않는다."""
 
 
 def to_original(q):
-    """한글 질의 -> 현지 표기 후보. 한글이 없으면 빈 리스트(원래 질의를 그대로 씀)."""
+    """질의 -> (국가코드, 현지 표기 후보들).
+
+    호출부는 인덱스 직접 검색이 0건일 때만 부른다. 그래서 한글뿐 아니라
+    로마자도 변환한다 — 일본 피드의 이름은 일본어라 "Shibuya"로는 안 걸린다.
+
+    국가까지 받는 이유: 후보만으로 순위를 매기면 "Tokyo"(5자)가 "東京駅"(3자)를
+    이겨서 자카르타의 Tokyo Riverside가 東京駅을 누른다. 글자 수는 문자 체계가
+    다르면 비교가 성립하지 않는다. 국가를 알면 한 문자 체계 안에서만 비교하게
+    되어 그 문제가 사라진다.
+    """
     q = q.strip()
-    if not q or not any("가" <= c <= "힣" for c in q):
-        return []
+    if len(q) < 2:
+        return "", []
 
     with _db() as con:
         con.execute("CREATE TABLE IF NOT EXISTS q (src TEXT PRIMARY KEY, cands TEXT)")
         hit = con.execute("SELECT cands FROM q WHERE src = ?", (q,)).fetchone()
     if hit:
-        return json.loads(hit[0])
+        got = json.loads(hit[0])
+        return got.get("country", ""), got.get("names", [])
     if not os.getenv("ANTHROPIC_API_KEY"):
-        return []
+        return "", []
 
     import anthropic
     try:
@@ -151,20 +167,23 @@ def to_original(q):
             messages=[{"role": "user", "content": q}],
         )
         if r.stop_reason == "refusal":
-            return []
+            return "", []
         body = "".join(b.text for b in r.content if b.type == "text").strip()
         if body.startswith("```"):
             body = body.split("\n", 1)[1].rsplit("```", 1)[0]
-        cands = [str(x).strip() for x in json.loads(body) if str(x).strip()][:6]
+        got = json.loads(body)
+        country = str(got.get("country") or "").strip().upper()[:2]
+        names = [str(x).strip() for x in (got.get("names") or []) if str(x).strip()][:6]
     except Exception as e:
         print(f"[질의 변환 실패] {type(e).__name__}: {e}")
-        return []
+        return "", []
 
     with _db() as con:
         con.execute("CREATE TABLE IF NOT EXISTS q (src TEXT PRIMARY KEY, cands TEXT)")
         con.execute("INSERT OR REPLACE INTO q VALUES (?, ?)",
-                    (q, json.dumps(cands, ensure_ascii=False)))
-    return cands
+                    (q, json.dumps({"country": country, "names": names},
+                                   ensure_ascii=False)))
+    return country, names
 
 
 def demo():
@@ -190,10 +209,13 @@ def demo():
         assert any("가" <= c <= "힣" for c in ko), f"한글이 없음: {src} -> {ko}"
         print(f"  {src:<38} -> {ko}")
     assert cached(list(got)) == got, "캐시에 저장이 안 됨"
-    cands = to_original("신주쿠")
-    assert any("新宿" in c or "Shinjuku" in c for c in cands), f"질의 변환 실패: {cands}"
-    print(f"  질의 변환: '신주쿠' -> {cands}")
-    assert to_original("Britomart") == [], "한글 없는 질의는 변환하지 않아야 함"
+    cc, cands = to_original("신주쿠")
+    assert any("新宿" in c for c in cands), f"질의 변환 실패: {cands}"
+    assert cc == "JP", f"국가 판정 실패: {cc}"
+    print(f"  질의 변환: '신주쿠' -> [{cc}] {cands}")
+    cc2, romaji = to_original("Shibuya")
+    assert any("渋谷" in c for c in romaji) and cc2 == "JP", f"로마자 변환 실패: {cc2} {romaji}"
+    print(f"  질의 변환: 'Shibuya' -> [{cc2}] {romaji}")
     print("자체 점검 통과 (캐시 저장 확인)")
 
 

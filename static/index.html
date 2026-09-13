@@ -40,15 +40,16 @@
     width: 100%; font: inherit; color: var(--ink); background: var(--paper);
     border: 1px solid var(--rule); border-radius: 7px; padding: 11px 13px;
   }
-  .find input { font-size: 16px; }
-  .find select { font-size: 14px; color: var(--muted); }
+  /* 16px 미만이면 iOS가 탭할 때 화면을 확대한다 */
+  .find input, .find select { font-size: 16px; }
+  .find select { color: var(--muted); }
   .find input:focus-visible, .find select:focus-visible {
     outline: 2px solid var(--ink); outline-offset: 1px; background: var(--board);
   }
 
   .hits { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1;
           border-top: 1px solid var(--rule); }
-  .hit { padding: 12px 24px; cursor: pointer; border-bottom: 1px solid var(--rule);
+  .hit { padding: 14px 24px; cursor: pointer; border-bottom: 1px solid var(--rule);
          display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; }
   .hit:hover, .hit:focus-visible { background: var(--paper); outline: none; }
   .hit[aria-current='true'] { background: var(--paper);
@@ -59,6 +60,9 @@
   .hit b { font-weight: 500; font-size: 15px; display: block; }
   .hit em { font-style: normal; color: var(--muted); font-size: 13px; display: block; }
   .hit i  { font-style: normal; color: var(--muted); font-size: 12px; }
+  /* 안내 문구는 결과 행이 아니다. 30px 뱃지 칸에 들어가면 세로로 떨어진다. */
+  .note { display: block; cursor: default; color: var(--muted); font-size: 13px; }
+  .note:hover { background: none; }
   .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--rule);
          border-radius: 4px; padding: 0 4px; margin-left: 5px; }
 
@@ -171,13 +175,13 @@ async function run() {
   writeUrl({ q, country });
   if (!q) { hits = []; $('#hits').innerHTML = ''; return blank(); }
 
-  $('#hits').innerHTML = `<li class="hit"><i>찾는 중…</i></li>`;
+  $('#hits').innerHTML = `<li class="hit note">찾는 중…</li>`;
   hits = await (await fetch(
     `/api/stops?q=${encodeURIComponent(q)}&country=${encodeURIComponent(country)}`)).json();
 
   if (!hits.length) {
-    $('#hits').innerHTML = `<li class="hit"><i>그 이름으로는 찾지 못했습니다.
-      철자를 바꾸거나 국가를 넓혀 보세요.</i></li>`;
+    $('#hits').innerHTML = `<li class="hit note">그 이름으로는 찾지 못했습니다.
+      철자를 바꾸거나 국가를 넓혀 보세요.</li>`;
     return;
   }
   paintHits();
@@ -253,7 +257,10 @@ async function pick(r, push) {
   const d = await (await fetch(`/api/departures?feed_id=${encodeURIComponent(r.feed_id)}`
     + `&stop_id=${encodeURIComponent(r.stop_id)}`)).json();
 
-  const meta = `<div class="meta"><span>${esc(d.agency || '')}</span>
+  const bays = (r.stop_id || '').split(',').filter(Boolean).length;
+  const meta = `<div class="meta">
+      <span>${esc(d.agency || '')}${bays > 1
+        ? ` <span class="tag">승강장 ${bays}곳 합산</span>` : ''}</span>
       <span class="num">현지 시각 ${esc(d.local_time || '')}</span></div></div>`;
 
   if (d.error) return $('#board').innerHTML = head + meta + `<p>${esc(d.error)}</p>`;

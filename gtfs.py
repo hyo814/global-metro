@@ -157,7 +157,11 @@ class Feed:
         """
         now = now or datetime.now(self.tz)
         now_secs = now.hour * 3600 + now.minute * 60 + now.second
-        group = self.stop_group(stop_id)
+        # 인덱스가 같은 이름의 인접 정류장을 묶어서 넘겨준다("a,b,c").
+        # 양방향 정류장은 한 안내판에 모아 보여주는 게 맞다.
+        ids = stop_id if isinstance(stop_id, list) else str(stop_id).split(",")
+        group = list(dict.fromkeys(
+            g for one in ids if one.strip() for g in self.stop_group(one.strip())))
 
         out = []
         # offset: -1=어제(자정 넘긴 편성), 0=오늘, 1=내일 …
@@ -169,9 +173,10 @@ class Feed:
             if not services:
                 continue
             shift = -offset * 86400        # 그 날 자정을 오늘 자정 기준으로 옮긴다
-            for secs_val, short, long_, head, color, text in self._at_stop(
+            for secs_val, short, long_, head, color, text, trip in self._at_stop(
                     group, services, now_secs + shift, limit):
                 out.append({
+                    "trip_id": trip,
                     "secs": secs_val - shift,
                     "time": hhmm(secs_val),
                     "in_min": (secs_val - shift - now_secs) // 60,
@@ -185,7 +190,35 @@ class Feed:
             if len(out) >= limit and offset >= 0:
                 break
         out.sort(key=lambda d: d["secs"])
-        return out[:limit]
+        out = out[:limit]
+        self._fill_headsigns(out)
+        return out
+
+    def _fill_headsigns(self, runs):
+        """행선지가 비면 그 편성의 종점 이름으로 채운다.
+
+        받아둔 피드의 13%는 trip_headsign이 통째로 비어 있다(공백만 든 경우 포함).
+        행선지가 없으면 시각만 있는 표가 되어 쓸 수 없다. 종점은 stop_times의
+        stop_sequence 최댓값이라 언제나 구할 수 있다.
+        """
+        need = sorted({r["trip_id"] for r in runs
+                       if not r["headsign"] and r.get("trip_id")})
+        if not need:
+            return
+        rows = self.con.execute("""
+            SELECT trip_id, stop_name FROM (
+                SELECT st.trip_id, s.stop_name,
+                       row_number() OVER (PARTITION BY st.trip_id
+                           ORDER BY CAST(st.stop_sequence AS INTEGER) DESC) AS rn
+                FROM stop_times st
+                JOIN stops s ON trim(s.stop_id) = trim(st.stop_id)
+                WHERE list_contains(?::VARCHAR[], trim(st.trip_id))
+            ) WHERE rn = 1
+        """, [need]).fetchall()
+        last = {t: n for t, n in rows}
+        for r in runs:
+            if not r["headsign"]:
+                r["headsign"] = (last.get(r["trip_id"]) or "").strip()
 
     def _at_stop(self, stop_ids, services, threshold, limit):
         # ponytail: stop_times 전체를 스캔한다. 한 피드(평균 15만행)라 수십 ms.
@@ -206,14 +239,14 @@ class Feed:
                 FROM frequencies
                 WHERE headway_secs IS NOT NULL AND CAST(headway_secs AS BIGINT) > 0
             ), sched AS (
-                SELECT st.secs, trip.trip_headsign, trip.route_id
+                SELECT st.secs, trip.trip_headsign, trip.route_id, st.trip_id
                 FROM st JOIN trip USING (trip_id)
                 WHERE list_contains(?::VARCHAR[], st.stop_id)
                   AND st.trip_id NOT IN (SELECT trip_id FROM fr)
             ), gen AS (
                 -- frequencies 기반: stop_times는 패턴이므로 headway 간격으로 펼친다
                 SELECT fr.s0 + g.i * fr.hw + (st.secs - t0.s0) AS secs,
-                       trip.trip_headsign, trip.route_id
+                       trip.trip_headsign, trip.route_id, fr.trip_id
                 FROM fr
                 JOIN st ON st.trip_id = fr.trip_id
                        AND list_contains(?::VARCHAR[], st.stop_id)
@@ -224,9 +257,11 @@ class Feed:
                      0, CAST((fr.s1 - fr.s0) / fr.hw AS BIGINT)) AS g(i)
             )
             SELECT d.secs, r.route_short_name, r.route_long_name, d.trip_headsign,
-                   {rc}, {rt}
+                   {rc}, {rt}, d.trip_id
             FROM (SELECT * FROM sched UNION ALL SELECT * FROM gen) d
-            LEFT JOIN routes r ON r.route_id = d.route_id
+            -- trim: 고정폭 공백을 붙여 내보내는 피드가 있다. Renfe Cercanías는
+            -- 패딩 때문에 이 조인이 137,715건 중 95건만 맞았다.
+            LEFT JOIN routes r ON trim(r.route_id) = trim(d.route_id)
             WHERE d.secs >= ?
             ORDER BY d.secs LIMIT ?
         """, [services, stop_ids, stop_ids, threshold, limit]).fetchall()
