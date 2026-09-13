@@ -66,12 +66,14 @@ def _call_api(texts):
     try:
         client = anthropic.Anthropic()
         # effort를 low로 낮추면 안전 분류기가 이 작업을 cyber로 오탐해서 절반쯤
-        # refusal이 난다(실측 4회 중 2회). 기본값을 쓴다. 캐싱 덕에 호출량이
-        # 적어서 어차피 비용 차이가 거의 없다.
+        # refusal이 난다(실측 4회 중 2회). medium은 거절 0/7이고 음차 오류도
+        # 없으면서 25%쯤 빠르다(7.4~9.3초 -> 5.2~7.8초). 한 번 호출이 곧
+        # 화면 대기 시간이라 이 차이가 체감된다.
         r = client.beta.messages.create(
             model=MODEL,
             max_tokens=8000,
             system=SYSTEM,
+            output_config={"effort": "medium"},
             betas=["server-side-fallback-2026-06-01"],
             fallbacks=[{"model": "claude-opus-4-8"}],   # 그래도 거절되면 자동 재시도
             messages=[{"role": "user",

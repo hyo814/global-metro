@@ -79,6 +79,7 @@ body {
 
 /* 안내 문구는 결과 행이 아니다. 아래 그리드를 타면 뱃지 칸에 갇혀 세로로 떨어진다. */
 .note { padding: 18px 26px; color: var(--dim); font-size: 13.5px; }
+.note.quiet { padding: 10px 26px; font-size: 12.5px; border-bottom: 1px solid var(--line); }
 
 .hit {
   display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 12px;

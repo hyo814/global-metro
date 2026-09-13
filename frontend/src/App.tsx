@@ -44,6 +44,7 @@ export default function App() {
   const [active, setActive] = useState<Slot>("from");
   const [hits, setHits] = useState<Stop[]>([]);
   const [busy, setBusy] = useState(false);
+  const [filling, setFilling] = useState(false);   // 한국어 이름 채우는 중
   const [board, setBoard] = useState<Board | null>(null);
   const [route, setRoute] = useState<Route | null>(null);
   const [walk, setWalk] = useState(500);   // m. 걸어도 되는 거리
@@ -83,10 +84,23 @@ export default function App() {
     setHits(rows);
     setBusy(false);
 
-    const got = await api.translate(rows.filter((r) => !r.stop_name_ko).map((r) => r.stop_name));
-    if (mine !== run.current || !Object.keys(got).length) return;
+    // 이름이 같으면 운영사가 유일한 구별 수단이다. 그것도 한글이어야 한다.
+    // 한 번에 부른다. 지연은 개수가 아니라 호출 수에 비례한다 — 10개와
+    // 25개가 둘 다 5~8초라서, 나누면 대기가 두 배가 된다(실측).
+    setFilling(true);
+    const got = await api.translate(
+      rows.flatMap((r) => [r.stop_name_ko ? "" : r.stop_name,
+                           r.agency_ko ? "" : r.agency]),
+    );
+    if (mine !== run.current) return;
+    setFilling(false);
+    if (!Object.keys(got).length) return;
     setHits((prev) =>
-      prev.map((r) => (got[r.stop_name] ? { ...r, stop_name_ko: got[r.stop_name] } : r)),
+      prev.map((r) => ({
+        ...r,
+        stop_name_ko: got[r.stop_name] || r.stop_name_ko,
+        agency_ko: got[r.agency] || r.agency_ko,
+      })),
     );
   }, []);
 
@@ -218,6 +232,9 @@ export default function App() {
 
         <ul className="hits">
           {busy && <li className="note">찾는 중…</li>}
+          {!busy && filling && hits.some((r) => !r.stop_name_ko) && (
+            <li className="note quiet">한국어 이름을 불러오는 중…</li>
+          )}
           {!busy && q.trim() && !hits.length && !chosenHere && (
             <li className="note">그 이름으로는 찾지 못했습니다. 철자를 바꾸거나 국가를 넓혀 보세요.</li>
           )}
