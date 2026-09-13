@@ -43,10 +43,16 @@ EMPTY = {
 
 
 def secs(t):
-    """'25:30:00' -> 91800. 빈 값이면 None."""
+    """'25:30:00' -> 91800. 빈 값이면 None.
+
+    GTFS는 언제나 HH:MM:SS지만 사용자가 입력하는 시각은 HH:MM이라 둘 다 받는다.
+    """
     if not t or not t.strip():
         return None
-    h, m, s = (int(x) for x in t.strip().split(":"))
+    parts = [int(x) for x in t.strip().split(":")]
+    if len(parts) == 2:
+        parts.append(0)
+    h, m, s = parts
     return h * 3600 + m * 60 + s
 
 
