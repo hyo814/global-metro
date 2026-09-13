@@ -35,29 +35,40 @@ body {
   display: grid; place-items: center; padding: 24px;
 }
 .splash.out { opacity: 0; pointer-events: none; }
-.splash-in { text-align: center; display: grid; gap: 22px; justify-items: center; }
+.splash-in { display: grid; gap: 26px; justify-items: center; }
 .splash .mark {
   font-size: 15px; font-weight: 600; color: var(--chalk-dim); letter-spacing: 0.01em;
 }
-.splash .swap {
-  display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-  justify-content: center;
+
+/* 왼쪽은 한국어, 오른쪽은 현지 표기. 가운데 선이 그 경계다. */
+.pairs { margin: 0; display: grid; gap: 12px; }
+.pairs > div {
+  display: grid; grid-template-columns: minmax(0, 1fr) 1px minmax(0, 1fr);
+  align-items: baseline; gap: 0 20px;
 }
-.splash .ko, .splash .orig {
-  font-size: clamp(34px, 9vw, 52px); font-weight: 600; letter-spacing: -0.04em;
-  color: var(--chalk); line-height: 1.1;
+.pairs > div::before {
+  content: ""; grid-column: 2; align-self: stretch; background: var(--board-2);
 }
-.splash .orig { color: var(--chalk-dim); }
-.splash .to { font-size: clamp(20px, 5vw, 28px); color: var(--chalk-dim); font-weight: 300; }
-.splash p { margin: 0; font-size: 14px; color: var(--chalk-dim); max-width: 30ch; }
+.pairs dt {
+  text-align: right; font-size: clamp(19px, 4.6vw, 27px); font-weight: 600;
+  letter-spacing: -0.03em; color: var(--chalk); line-height: 1.25;
+}
+.pairs dd {
+  margin: 0; font-size: clamp(19px, 4.6vw, 27px); font-weight: 400;
+  letter-spacing: -0.02em; color: var(--chalk-dim); line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.splash p {
+  margin: 0; font-size: 13.5px; color: var(--chalk-dim); max-width: 34ch;
+  text-align: center; line-height: 1.7;
+}
 
 @media (prefers-reduced-motion: no-preference) {
   .splash { transition: opacity .32s ease; }
-  /* 원어가 뒤늦게 자리를 잡는다 — 이 앱이 하는 일 그대로 */
-  .splash .orig { animation: settle .5s ease .18s backwards; }
-  .splash .to { animation: settle .4s ease .1s backwards; }
+  /* 현지 표기가 뒤늦게 자리를 잡는다 — 이 앱이 하는 일 그대로 */
+  .pairs dd { animation: settle .46s ease calc(.12s + var(--i) * .09s) backwards; }
   @keyframes settle {
-    from { opacity: 0; transform: translateY(6px); }
+    from { opacity: 0; transform: translateY(5px); }
     to { opacity: 1; transform: none; }
   }
 }

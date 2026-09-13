@@ -1,0 +1,15 @@
+{
+  "name": "어디로 가는 차",
+  "short_name": "어디로",
+  "description": "전 세계 대중교통을 한국어로. 63개국 368만 개 정류장.",
+  "lang": "ko",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1420",
+  "theme_color": "#0d1420",
+  "icons": [
+    { "src": "/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/icon-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
