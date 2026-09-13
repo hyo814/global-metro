@@ -73,7 +73,10 @@ export default function JourneyPanel({
           {from.stop_name} → {to.stop_name}
         </p>
         <div className="meta">
-          <span>{data?.agency ?? from.agency}</span>
+          <span>
+            {data?.agency ?? from.agency}
+            {data && data.feeds > 1 && <em>운영사 {data.feeds}곳을 이어서</em>}
+          </span>
           {data?.local_time && <time className="num">현지 {data.local_time}</time>}
         </div>
       </header>
@@ -95,6 +98,7 @@ export default function JourneyPanel({
                 {p.depart} → {p.arrive}
               </span>
               <span>{p.transfers ? `환승 ${p.transfers}회` : "환승 없음"}</span>
+              {p.walk_minutes > 0 && <span>걷기 {fmt(p.walk_minutes)}</span>}
               {p.max_wait >= 20 && <em>기다림 {fmt(p.max_wait)}</em>}
             </div>
             <Steps plan={p} />

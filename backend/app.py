@@ -16,7 +16,8 @@ from functools import lru_cache
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from build_index import countries, feed_info, search, stop_by_id
+from build_index import (countries, ensure_geo, feed_info, feeds_covering,
+                         search, stop_by_id)
 from gtfs import Feed, hhmm, secs
 from router import Timetable
 from router import search as find_route
@@ -42,11 +43,27 @@ def feed_for(zip_path):
 _feed_lock = threading.Lock()
 
 
-# 시각표 펼치는 데 1~2초 걸린다. 피드·날짜별로 재사용한다.
+ensure_geo()   # 격자 색인이 없으면 처음 한 번 만든다
+
+
+# 시각표 펼치는 데 1~2초 걸린다. 피드 묶음·날짜별로 재사용한다.
 @lru_cache(maxsize=4)
-def timetable_for(zip_path, day_iso):
+def timetable_for(feed_key, day_iso):
     from datetime import date
-    return Timetable(feed_for(zip_path), date.fromisoformat(day_iso))
+    feeds = [(fid, feed_for(zp)) for fid, zp in feed_key]
+    return Timetable(feeds, date.fromisoformat(day_iso))
+
+
+def region_feeds(a, b):
+    """두 정류장을 포함하는 구역에 걸친 피드들. 도쿄처럼 버스와 지하철이
+    다른 피드에 있어도 한 망으로 묶어 길을 찾기 위한 것이다."""
+    las = [float(a["lat"]), float(b["lat"])]
+    los = [float(a["lon"]), float(b["lon"])]
+    pad = 0.05                                   # 약 5km 여유
+    picked = feeds_covering(min(las) - pad, max(las) + pad,
+                            min(los) - pad, max(los) + pad,
+                            must={a["feed_id"], b["feed_id"]})
+    return tuple((f["feed_id"], f["zip"]) for f in picked)
 
 
 def with_korean(rows, *fields, use_api=False):
@@ -182,27 +199,35 @@ def spa(path):
 
 @app.get("/api/route")
 def route():
-    """A에서 B까지. 두 정류장이 같은 피드에 있어야 한다."""
-    feed_id = request.args.get("feed_id", "").strip()
-    src = request.args.get("from", "").strip()
-    dst = request.args.get("to", "").strip()
-    if not (feed_id and src and dst):
-        return jsonify({"error": "feed_id, from, to가 필요합니다"}), 400
+    """A에서 B까지. 피드가 달라도 좌표로 이어 붙여 한 망으로 본다."""
+    src = stop_by_id(request.args.get("from_feed", "").strip(),
+                     request.args.get("from_stop", "").strip())
+    dst = stop_by_id(request.args.get("to_feed", "").strip(),
+                     request.args.get("to_stop", "").strip())
+    if not src or not dst:
+        return jsonify({"error": "출발지와 도착지가 필요합니다"}), 400
+    try:
+        walk = max(200, min(2000, int(request.args.get("walk", 500))))
+    except ValueError:
+        walk = 500
 
-    info = feed_info(feed_id)
-    if not info:
-        return jsonify({"error": f"모르는 피드입니다: {feed_id}"}), 404
-
-    feed = feed_for(info["zip"])
+    key = region_feeds(src, dst)
+    feed = feed_for(dict(key)[src["feed_id"]])
     now = datetime.now(feed.tz)
     at = request.args.get("at", "").strip()
     depart = secs(at) if at and ":" in at else now.hour * 3600 + now.minute * 60
 
+    def ids(stop):
+        return [f'{stop["feed_id"]}:{s}' for s in stop["stop_id"].split(",") if s]
+
     with _feed_lock:
-        tt = timetable_for(info["zip"], now.date().isoformat())
-        plans = find_route(tt, src.split(","), dst.split(","), depart)
-        names = dict(feed.con.execute(
-            "SELECT trim(stop_id), stop_name FROM stops").fetchall())
+        tt = timetable_for(key, now.date().isoformat())
+        plans = find_route(tt, ids(src), ids(dst), depart, walk_max=walk)
+        names = {}
+        for fid, fd in tt.feeds:
+            for sid, nm in fd.con.execute(
+                    "SELECT trim(stop_id), stop_name FROM stops").fetchall():
+                names[f"{fid}:{sid}"] = nm
 
     out = []
     for j in plans:
@@ -219,17 +244,17 @@ def route():
                             stops=leg["stops"],
                             minutes=(leg["arrive"] - leg["depart"]) // 60)
             legs.append(base)
-        # 환승 대기가 길면 사용자가 알아야 한다
         rides = [l for l in j["legs"] if l["mode"] == "ride"]
         waits = [rides[i + 1]["depart"] - rides[i]["arrive"] for i in range(len(rides) - 1)]
         out.append({"legs": legs, "transfers": j["transfers"],
-                    "depart": hhmm(j["depart"]), "arrive": hhmm(j["arrive"]),
-                    "minutes": j["duration"] // 60,
+                    "depart": hhmm(j["depart"]), "board": hhmm(j["board"]),
+                    "arrive": hhmm(j["arrive"]), "minutes": j["duration"] // 60,
+                    "walk_minutes": sum(l["secs"] for l in j["legs"]
+                                        if l["mode"] == "walk") // 60,
                     "max_wait": max(waits) // 60 if waits else 0})
 
-    texts = [l["from"] for p in out for l in p["legs"]] + \
-            [l["to"] for p in out for l in p["legs"]] + \
-            [l.get("headsign", "") for p in out for l in p["legs"]]
+    texts = [x for p in out for l in p["legs"]
+             for x in (l["from"], l["to"], l.get("headsign", ""))]
     ko = korean(texts, use_api=False)
     for p in out:
         for l in p["legs"]:
@@ -238,8 +263,12 @@ def route():
             if l.get("headsign"):
                 l["headsign_ko"] = ko.get(l["headsign"], "")
 
-    return jsonify({"agency": info["agency"], "timezone": info["timezone"],
-                    "local_time": now.strftime("%H:%M"), "plans": out})
+    return jsonify({"agency": ", ".join(sorted({f["agency"] for f in
+                        [feed_info(fid) or {"agency": ""} for fid, _ in key]}
+                        - {""}))[:80],
+                    "feeds": len(key), "walk": walk,
+                    "timezone": str(feed.tz), "local_time": now.strftime("%H:%M"),
+                    "plans": out})
 
 
 def lan_ip():

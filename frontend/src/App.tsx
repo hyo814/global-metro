@@ -46,6 +46,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [board, setBoard] = useState<Board | null>(null);
   const [route, setRoute] = useState<Route | null>(null);
+  const [walk, setWalk] = useState(500);   // m. 걸어도 되는 거리
   const run = useRef(0); // 늦게 온 응답이 최신 결과를 덮지 않도록
 
   useEffect(() => {
@@ -112,12 +113,11 @@ export default function App() {
     setBoard(null);
     setRoute(null);
     if (from && to) {
-      if (from.feed_id !== to.feed_id) return;
       let alive = true;
-      api.findRoute(from.feed_id, from.stop_id, to.stop_id)
+      api.findRoute(from, to, walk)
         .then((r) => alive && setRoute(r))
         .catch(() => alive && setRoute({ agency: "", timezone: "", local_time: "",
-          plans: [], error: "길을 불러오지 못했습니다." }));
+          feeds: 0, walk, plans: [], error: "길을 불러오지 못했습니다." }));
       return () => { alive = false; };
     }
     const one = from ?? to;
@@ -142,7 +142,7 @@ export default function App() {
       .catch(() => alive && setBoard({ agency: "", timezone: "", country: "",
         local_time: "", departures: [], error: "시간표를 불러오지 못했습니다." }));
     return () => { alive = false; };
-  }, [stop]);
+  }, [stop, walk]);
 
   const choose = (s: Stop) => {
     setStop((p) => ({ ...p, [active]: s }));
@@ -159,7 +159,7 @@ export default function App() {
 
   const fields: [Slot, string][] = [["from", "출발"], ["to", "도착"]];
   const both = stop.from && stop.to;
-  const mismatch = both && stop.from!.feed_id !== stop.to!.feed_id;
+  const walks: [number, string][] = [[350, "적게"], [500, "보통"], [1200, "많이"]];
 
   return (
     <div className="app">
@@ -177,7 +177,7 @@ export default function App() {
                 value={text[k]}
                 onChange={(e) => setText((p) => ({ ...p, [k]: e.target.value }))}
                 onFocus={() => setActive(k)}
-                placeholder={k === "from" ? "정류장 (한국어로도 됩니다)" : "도착지 — 비우면 출발 안내판"}
+                placeholder={k === "from" ? "정류장 이름" : "비우면 출발 안내판"}
                 aria-label={tag}
                 autoComplete="off"
                 autoFocus={k === "from"}
@@ -189,6 +189,15 @@ export default function App() {
               )}
             </label>
           ))}
+          {both && (
+            <div className="walkpick" role="group" aria-label="걸어도 되는 거리">
+              <span>걷기</span>
+              {walks.map(([m, tag]) => (
+                <button key={m} type="button" aria-pressed={walk === m}
+                        onClick={() => setWalk(m)}>{tag}</button>
+              ))}
+            </div>
+          )}
           <select value={country} onChange={(e) => setCountry(e.target.value)} aria-label="국가">
             <option value="">모든 나라</option>
             {places.map((c) => (
@@ -233,12 +242,7 @@ export default function App() {
       </aside>
 
       <main className="board">
-        {mismatch ? (
-          <p className="status">
-            출발과 도착이 서로 다른 운영사의 자료에 있습니다. 길찾기는 같은 운영사 안에서만
-            됩니다 — 두 곳을 같은 운영사로 맞춰 주세요.
-          </p>
-        ) : both ? (
+        {both ? (
           <JourneyPanel from={stop.from!} to={stop.to!} data={route} />
         ) : stop.from || stop.to ? (
           <BoardPanel stop={(stop.from ?? stop.to)!} data={board} />

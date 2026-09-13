@@ -49,6 +49,14 @@ def feed_countries():
         return {}
 
 
+def _num(v):
+    try:
+        float(v)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def _dist(a, b):
     """두 (lat, lon) 사이 대략 거리(m). 좌표가 없으면 None."""
     try:
@@ -97,7 +105,8 @@ def build(zips, country):
         PRAGMA journal_mode=OFF;
         PRAGMA synchronous=OFF;
         CREATE TABLE feeds (feed_id TEXT PRIMARY KEY, zip TEXT, agency TEXT,
-                            timezone TEXT, country TEXT, n_stops INTEGER);
+                            timezone TEXT, country TEXT, n_stops INTEGER,
+                            la1 REAL, la2 REAL, lo1 REAL, lo2 REAL);
         -- 한 테이블에 다 넣는다. 조인도 동기화도 없다.
         CREATE VIRTUAL TABLE stops USING fts5(
             name, feed_id UNINDEXED, stop_id UNINDEXED,
@@ -155,10 +164,14 @@ def build(zips, country):
 
         # 망 규모는 "얼마나 중요한 정류장인가"의 싼 대용치다. 정류장 5천 개짜리
         # 도쿄 교통국의 '新宿'과 마을버스의 '新宿'을 같은 순위로 두면 안 된다.
-        con.execute("INSERT OR REPLACE INTO feeds VALUES (?,?,?,?,?,?)",
+        las = [float(x[3]) for x in batch if _num(x[3])]
+        los = [float(x[4]) for x in batch if _num(x[4])]
+        con.execute("INSERT OR REPLACE INTO feeds VALUES (?,?,?,?,?,?,?,?,?,?)",
                     (feed_id, str(p), ag.get("agency_name") or "",
                      ag.get("agency_timezone") or "", country.get(feed_id, ""),
-                     len(batch)))
+                     len(batch),
+                     min(las) if las else None, max(las) if las else None,
+                     min(los) if los else None, max(los) if los else None))
         con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?,?)", batch)
         n_stop += len(batch)
         n_feed += 1
@@ -174,6 +187,12 @@ def build(zips, country):
     con.close()
     tmp.replace(OUT)
     return n_feed, n_stop, skipped, time.time() - t0
+
+
+def _abs(zip_path):
+    """예전 인덱스는 상대경로를 담고 있다. 실행 위치와 무관하게 열리도록 푼다."""
+    q = pathlib.Path(zip_path)
+    return str(q if q.is_absolute() else ROOT / q)
 
 
 def _con():
@@ -225,12 +244,94 @@ def stop_by_id(feed_id, stop_id):
             "agency": r[6] or "", "country": r[7] or "", "trips": int(r[8] or 0)}
 
 
+CELL = 0.1          # 도. 약 11km 격자
+
+
+def ensure_geo():
+    """피드별 좌표 범위와 격자 색인을 채운다. 없으면 한 번만 만든다.
+
+    좌표 범위만으로는 부족하다. 프랑스 국가 피드는 39.1~60.2N이라 사각형이
+    헬싱키까지 덮는다. 실제로 그 지역에 정류장이 있는지를 보려면 격자가 필요하다.
+    """
+    con = sqlite3.connect(OUT)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(feeds)")}
+    for c in ("la1", "la2", "lo1", "lo2"):
+        if c not in cols:
+            con.execute(f"ALTER TABLE feeds ADD COLUMN {c} REAL")
+    con.execute("""CREATE TABLE IF NOT EXISTS cells
+                   (cx INTEGER, cy INTEGER, feed_id TEXT, n INTEGER,
+                    PRIMARY KEY (cx, cy, feed_id))""")
+    con.execute("CREATE INDEX IF NOT EXISTS cells_xy ON cells (cx, cy)")
+
+    done = con.execute("SELECT count(*) FROM cells").fetchone()[0]
+    if done and not con.execute(
+            "SELECT count(*) FROM feeds WHERE la1 IS NULL").fetchone()[0]:
+        con.close()
+        return
+
+    # 같은 연결에서 SELECT를 돌면서 쓰면 잠긴다. 읽기는 따로 연다.
+    rd = sqlite3.connect(f"file:{OUT}?mode=ro", uri=True)
+    box, cells = {}, {}
+    for feed_id, la, lo in rd.execute("SELECT feed_id, lat, lon FROM stops"):
+        try:
+            la, lo = float(la), float(lo)
+        except (TypeError, ValueError):
+            continue
+        b = box.get(feed_id)
+        if b is None:
+            box[feed_id] = [la, la, lo, lo]
+        else:
+            b[0] = min(b[0], la); b[1] = max(b[1], la)
+            b[2] = min(b[2], lo); b[3] = max(b[3], lo)
+        key = (int(la // CELL), int(lo // CELL), feed_id)
+        cells[key] = cells.get(key, 0) + 1
+    rd.close()
+
+    con.executemany("UPDATE feeds SET la1=?, la2=?, lo1=?, lo2=? WHERE feed_id=?",
+                    [(*v, k) for k, v in box.items()])
+    con.execute("DELETE FROM cells")
+    con.executemany("INSERT INTO cells VALUES (?,?,?,?)",
+                    [(cx, cy, fid, n) for (cx, cy, fid), n in cells.items()])
+    con.commit()
+    con.close()
+
+
+def feeds_covering(la1, la2, lo1, lo2, must=(), limit=12, max_stops=120_000):
+    """이 구역에 실제로 정류장이 있는 피드들.
+
+    must에 준 피드는 무조건 넣는다. 출발지와 도착지가 속한 피드는 예산과
+    무관하게 필요하기 때문이다. 나머지는 그 구역의 정류장이 많은 순으로
+    예산까지 채우되, 큰 피드 하나 때문에 멈추지 않고 건너뛴다.
+    """
+    con = _con()
+    rows = con.execute("""
+        SELECT c.feed_id, sum(c.n) AS here, f.zip, f.agency, coalesce(f.n_stops, 0)
+        FROM cells c JOIN feeds f ON f.feed_id = c.feed_id
+        WHERE c.cx BETWEEN ? AND ? AND c.cy BETWEEN ? AND ?
+        GROUP BY c.feed_id ORDER BY here DESC
+    """, (int(la1 // CELL), int(la2 // CELL),
+          int(lo1 // CELL), int(lo2 // CELL))).fetchall()
+
+    picked, total, seen = [], 0, set()
+    for want in (True, False):
+        for feed_id, here, zp, agency, n in rows:
+            if feed_id in seen or (feed_id in must) != want:
+                continue
+            if not want and (len(picked) >= limit or total + n > max_stops):
+                continue          # 큰 것 하나 때문에 뒤의 작은 것까지 버리지 않는다
+            seen.add(feed_id)
+            picked.append({"feed_id": feed_id, "zip": _abs(zp), "agency": agency,
+                           "n_stops": n, "here": here})
+            total += n
+    return picked
+
+
 def feed_info(feed_id):
     """feed_id -> zip 경로와 운영사 정보. 없으면 None."""
     r = _con().execute(
         "SELECT zip, agency, timezone, country FROM feeds WHERE feed_id = ?",
         (feed_id,)).fetchone()
-    return None if r is None else {"zip": r[0], "agency": r[1],
+    return None if r is None else {"zip": _abs(r[0]), "agency": r[1],
                                    "timezone": r[2], "country": r[3]}
 
 

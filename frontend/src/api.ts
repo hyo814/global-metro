@@ -60,10 +60,13 @@ export type Plan = {
   arrive: string;
   minutes: number;
   max_wait: number;
+  walk_minutes: number;
+  board: string;
 };
 
 export type Route = {
   agency: string; timezone: string; local_time: string;
+  feeds: number; walk: number;
   plans: Plan[];
   error?: string;
 };
@@ -73,10 +76,12 @@ export const stopById = (feedId: string, stopId: string) =>
     `/api/stop?feed_id=${encodeURIComponent(feedId)}&stop_id=${encodeURIComponent(stopId)}`,
   );
 
-export const findRoute = (feedId: string, from: string, to: string) =>
+export const findRoute = (from: Stop, to: Stop, walk: number) =>
   get<Route>(
-    `/api/route?feed_id=${encodeURIComponent(feedId)}` +
-      `&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+    `/api/route?from_feed=${encodeURIComponent(from.feed_id)}` +
+      `&from_stop=${encodeURIComponent(from.stop_id)}` +
+      `&to_feed=${encodeURIComponent(to.feed_id)}` +
+      `&to_stop=${encodeURIComponent(to.stop_id)}&walk=${walk}`,
   );
 
 export const board = (feedId: string, stopId: string) =>

@@ -38,11 +38,11 @@ body {
 
 .find { padding: 0 26px 18px; display: grid; gap: 8px; }
 .field { position: relative; display: grid;
-         grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center;
+         grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center;
          background: var(--rail-2); border: 1px solid transparent; border-radius: 9px; }
 .field.on { border-color: var(--ink); background: var(--rail); }
 .field .tag { font-size: 11.5px; font-weight: 600; color: var(--dim);
-              padding-left: 13px; letter-spacing: 0.02em; }
+              padding-left: 13px; letter-spacing: 0.02em; white-space: nowrap; }
 .field input { background: none; border: none; padding: 12px 4px 12px 0; }
 .field input:focus-visible { outline: none; }
 .field button { border: none; background: none; cursor: pointer; font-size: 17px;
@@ -59,6 +59,17 @@ body {
 .find input:focus-visible, .find select:focus-visible {
   outline: none; background: var(--rail); border-color: var(--ink);
 }
+
+/* 걸어도 되는 거리. 환승을 줄이려면 더 걸어야 할 때가 있다. */
+.walkpick { display: flex; align-items: center; gap: 4px; padding-top: 2px; }
+.walkpick span { font-size: 11.5px; color: var(--dim); font-weight: 600;
+                 width: 44px; padding-left: 13px; }
+.walkpick button { font: inherit; font-size: 13px; color: var(--dim); cursor: pointer;
+                   background: var(--rail-2); border: 1px solid transparent;
+                   border-radius: 7px; padding: 6px 12px; flex: 1; }
+.walkpick button[aria-pressed="true"] { background: var(--ink); color: var(--rail);
+                                        font-weight: 500; }
+.walkpick button:not([aria-pressed="true"]):hover { border-color: var(--line); }
 
 .hits { list-style: none; margin: 0; padding: 0; overflow-y: auto; flex: 1;
         border-top: 1px solid var(--line); }
@@ -103,6 +114,7 @@ body {
 }
 .stophead .meta em { font-style: normal; margin-left: 10px; padding: 2px 7px;
                      border: 1px solid var(--board-2); border-radius: 4px; font-size: 11.5px; }
+.stophead h1 { overflow-wrap: anywhere; }
 
 .status { color: var(--chalk-dim); max-width: 60ch; }
 
@@ -191,6 +203,9 @@ body {
   .rail { border-bottom: 1px solid var(--line); max-height: 48vh; }
   .brand { padding: 18px 20px 12px; }
   .find { padding: 0 20px 14px; }
+  .walkpick span { width: 40px; padding-left: 10px; }
+  .field { grid-template-columns: 40px minmax(0, 1fr) auto; }
+  .field .tag { padding-left: 10px; }
   .hit, .note { padding-left: 20px; padding-right: 20px; }
   .board { padding: 26px 20px calc(40px + env(safe-area-inset-bottom)); }
   .stophead h1 { font-size: 28px; }
