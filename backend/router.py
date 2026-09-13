@@ -25,6 +25,7 @@ WALK_MAX = 400         # m. 이보다 멀면 환승으로 치지 않는다
 CHANGE_TIME = 60       # s. 같은 정류장에서 갈아탈 때의 최소 여유
 ROUNDS = 5             # 최대 환승 4회
 SLOWER_OK = 45 * 60    # s. 환승이 적어도 이보다 늦게 닿으면 안 보여준다
+MAX_EXPAND = 300       # frequencies 한 trip을 펼칠 최대 개수
 INF = 1 << 30
 
 
@@ -67,6 +68,8 @@ class Timetable:
             trips[trip_id].append((stop_id, secs(arr), secs(dep)))
             meta[trip_id] = (route_id, (head or "").strip())
 
+        self.n_generated = self._expand_frequencies(trips, meta)
+
         # 정류장 번호 매기기
         self.stop_ids = []
         self.idx = {}
@@ -99,6 +102,49 @@ class Timetable:
                 self.by_stop[s].append((p, pos))
 
         self.n_trips = len(trips)
+
+    def _expand_frequencies(self, trips, meta):
+        """frequencies.txt를 쓰는 trip을 실제 운행으로 펼친다.
+
+        이런 trip의 stop_times는 시각표가 아니라 정차 간격만 담은 패턴이다.
+        RAPTOR는 구체적인 운행이 있어야 탈 차를 고를 수 있어서, 배차간격만큼
+        복제해 실제 시각을 만들어 넣는다. 피드의 16%가 이 형식이고,
+        한국 시내버스도 TAGO가 시각표 대신 배차간격을 주므로 이 경로를 탄다.
+        """
+        try:
+            freqs = self.feed.con.execute("""
+                SELECT trim(trip_id), start_time, end_time,
+                       CAST(nullif(trim(headway_secs), '') AS INTEGER)
+                FROM frequencies""").fetchall()
+        except Exception:
+            return 0                      # frequencies.txt가 없는 피드가 대부분이다
+
+        made = 0
+        for trip_id, t_start, t_end, headway in freqs:
+            base = trips.get(trip_id)
+            if not base or not headway or headway <= 0:
+                continue
+            s0, s1 = secs(t_start), secs(t_end)
+            if s0 is None or s1 is None or s1 <= s0:
+                continue
+            n = (s1 - s0) // headway + 1
+            if n > MAX_EXPAND:
+                # 배차 1분짜리를 하루치 펼치면 수천 개가 된다. 그 정도면
+                # 어차피 항상 차가 있으니 표본만 만들어도 답이 같다.
+                headway = max(headway, (s1 - s0) // MAX_EXPAND)
+                n = (s1 - s0) // headway + 1
+            first = base[0][2]            # 패턴의 기준 시각
+            del trips[trip_id]
+            route_id, head = meta.pop(trip_id)
+            for i in range(n):
+                shift = s0 + i * headway - first
+                new_id = f"{trip_id}#{i}"
+                trips[new_id] = [(sid, (a + shift) if a is not None else None,
+                                  (d + shift) if d is not None else None)
+                                 for sid, a, d in base]
+                meta[new_id] = (route_id, head)
+                made += 1
+        return made
 
     def _footpaths(self):
         """좌표로 도보 환승을 만든다. 격자에 넣고 이웃 칸만 본다."""
@@ -367,7 +413,37 @@ def demo():
             with_transfer += 1
     assert with_transfer > 0, "환승 경로가 하나도 안 나왔다"
     print(f"  환승 포함 경로가 나온 구간: {with_transfer}/40")
+
+    _check_frequencies()
     print("자체 점검 통과")
+
+
+def _check_frequencies():
+    """frequencies 전개를 출발 안내판과 대조한다.
+
+    안내판은 SQL로, 라우터는 파이썬으로 같은 일을 따로 구현했다. 두 결과가
+    어긋나면 둘 중 하나가 틀린 것이므로, 이 대조가 가장 강한 검사다.
+    """
+    from datetime import datetime, timedelta
+
+    f = Feed("../gtfs/mdb-1985_Aeroexpreso.zip")
+    day = next(d for d in (datetime.now(f.tz).date() + timedelta(days=i)
+                           for i in range(400)) if f.services_on(d))
+    tt = Timetable(f, day)
+    assert tt.n_generated > 0, "frequencies가 전개되지 않았다"
+
+    stop = "03701CUZ"
+    probe = datetime(day.year, day.month, day.day, 0, 0, tzinfo=f.tz)
+    board = {d["secs"] for d in f.departures(stop, now=probe, limit=500)
+             if d["day_offset"] == 0}
+    i = tt.idx[stop]
+    router = {tt.pat_dep[p][t][pos]
+              for p, pos in tt.by_stop[i]
+              for t in range(len(tt.pat_dep[p]))}
+    assert board == router, (
+        f"안내판과 라우터가 어긋남: 안내판만 {len(board - router)}개, "
+        f"라우터만 {len(router - board)}개")
+    print(f"  frequencies: {tt.n_generated}개 전개 · 안내판과 {len(board)}개 전부 일치")
 
 
 if __name__ == "__main__":
