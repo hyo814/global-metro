@@ -157,7 +157,11 @@ class Feed:
         """
         now = now or datetime.now(self.tz)
         now_secs = now.hour * 3600 + now.minute * 60 + now.second
-        group = self.stop_group(stop_id)
+        # 인덱스가 같은 이름의 인접 정류장을 묶어서 넘겨준다("a,b,c").
+        # 양방향 정류장은 한 안내판에 모아 보여주는 게 맞다.
+        ids = stop_id if isinstance(stop_id, list) else str(stop_id).split(",")
+        group = list(dict.fromkeys(
+            g for one in ids if one.strip() for g in self.stop_group(one.strip())))
 
         out = []
         # offset: -1=어제(자정 넘긴 편성), 0=오늘, 1=내일 …

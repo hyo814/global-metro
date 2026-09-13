@@ -15,6 +15,7 @@ import argparse
 import csv
 import io
 import json
+import math
 import pathlib
 import sqlite3
 import sys
@@ -43,6 +44,38 @@ def feed_countries():
     except Exception as e:
         print(f"  국가 정보 생략 ({type(e).__name__}: {e})", file=sys.stderr)
         return {}
+
+
+def _dist(a, b):
+    """두 (lat, lon) 사이 대략 거리(m). 좌표가 없으면 None."""
+    try:
+        la1, lo1 = float(a[0]), float(a[1])
+        la2, lo2 = float(b[0]), float(b[1])
+    except (TypeError, ValueError):
+        return None
+    p1, p2 = math.radians(la1), math.radians(la2)
+    dp, dl = math.radians(la2 - la1), math.radians(lo2 - lo1)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * 6371000 * math.asin(math.sqrt(h))
+
+
+def cluster(stops, radius=500):
+    """이름이 같은 정류장들을 거리로 묶는다.
+
+    인덱스 행의 48%가 (피드, 이름) 중복이다. 대부분은 같은 교차로의 양방향
+    정류장이거나 한 역의 여러 승강장이라 검색 결과에서는 한 곳으로 보여야 한다.
+    다만 5%는 이름만 같고 수 km 떨어진 다른 장소라 그건 나눈다.
+    """
+    out = []
+    for s in stops:
+        for c in out:
+            d = _dist((s[1], s[2]), (c[0][1], c[0][2]))
+            if d is not None and d <= radius:
+                c.append(s)
+                break
+        else:
+            out.append([s])
+    return out
 
 
 def rows(z, name):
@@ -80,10 +113,23 @@ def build(zips, country):
             continue
 
         ag = next(rows(z, "agency.txt"), {}) or {}
-        batch = [(r.get("stop_name") or "", feed_id, r.get("stop_id") or "",
-                  r.get("stop_lat") or "", r.get("stop_lon") or "",
-                  "1" if r.get("location_type") == "1" else "0")
-                 for r in rows(z, "stops.txt") if (r.get("stop_name") or "").strip()]
+
+        by_name = {}
+        for r in rows(z, "stops.txt"):
+            nm = (r.get("stop_name") or "").strip()
+            if nm:
+                by_name.setdefault(nm, []).append(
+                    (r.get("stop_id") or "", r.get("stop_lat") or "",
+                     r.get("stop_lon") or "",
+                     "1" if r.get("location_type") == "1" else "0"))
+
+        batch = []
+        for nm, group in by_name.items():
+            for c in cluster(group):
+                # 묶인 정류장의 stop_id를 모두 들고 간다. 시간표는 전부 합쳐 보여준다.
+                batch.append((nm, feed_id, ",".join(x[0] for x in c),
+                              c[0][1], c[0][2],
+                              "1" if any(x[3] == "1" for x in c) else "0"))
         if not batch:
             skipped += 1
             continue

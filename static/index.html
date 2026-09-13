@@ -253,7 +253,10 @@ async function pick(r, push) {
   const d = await (await fetch(`/api/departures?feed_id=${encodeURIComponent(r.feed_id)}`
     + `&stop_id=${encodeURIComponent(r.stop_id)}`)).json();
 
-  const meta = `<div class="meta"><span>${esc(d.agency || '')}</span>
+  const bays = (r.stop_id || '').split(',').filter(Boolean).length;
+  const meta = `<div class="meta">
+      <span>${esc(d.agency || '')}${bays > 1
+        ? ` <span class="tag">승강장 ${bays}곳 합산</span>` : ''}</span>
       <span class="num">현지 시각 ${esc(d.local_time || '')}</span></div></div>`;
 
   if (d.error) return $('#board').innerHTML = head + meta + `<p>${esc(d.error)}</p>`;
