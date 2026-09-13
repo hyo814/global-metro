@@ -77,8 +77,21 @@ def stops():
                     seen.add(key)
                     pool.append(r)
         low = {c.casefold() for c in cands}
+
+        def specificity(name):
+            """이름이 시작하는 후보 중 가장 긴 것의 길이.
+
+            "오사카"의 후보는 大阪 / 大阪駅 둘 다다. 大阪駅ＪＲ高速バスターミナル은
+            더 구체적인 大阪駅로 시작하므로, 大阪屋ショップ(마트)보다 위여야 한다.
+            정차 횟수만 보면 손님 많은 마트가 이겨버린다.
+            """
+            n = name.casefold()
+            return max((len(c) for c in cands if n.startswith(c.casefold())),
+                       default=0)
+
         pool.sort(key=lambda r: (r["stop_name"].casefold() not in low,
-                                 -r["net"], len(r["stop_name"])))
+                                 -specificity(r["stop_name"]),
+                                 -r["trips"], len(r["stop_name"])))
         rows = pool[:25]
     return jsonify(with_korean(rows, "stop_name", "agency"))
 

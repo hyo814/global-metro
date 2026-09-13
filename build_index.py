@@ -12,6 +12,7 @@
 못 잡아서 탈락시켰다.
 """
 import argparse
+import collections
 import csv
 import io
 import json
@@ -99,6 +100,7 @@ def build(zips, country):
         CREATE VIRTUAL TABLE stops USING fts5(
             name, feed_id UNINDEXED, stop_id UNINDEXED,
             lat UNINDEXED, lon UNINDEXED, is_station UNINDEXED,
+            trips UNINDEXED,
             tokenize='unicode61');
     """)
 
@@ -113,6 +115,20 @@ def build(zips, country):
             continue
 
         ag = next(rows(z, "agency.txt"), {}) or {}
+
+        # 정류장별 정차 횟수. 이게 "얼마나 중요한 정류장인가"의 진짜 신호다.
+        # 망 규모는 거꾸로 나올 때가 있다 — 大田原市(268개 망)의 新宿은 하루 10대,
+        # 東京都交通局(141개 망)의 新宿은 1,534대다.
+        calls = collections.Counter()
+        if "stop_times.txt" in z.namelist():
+            with z.open("stop_times.txt") as f:
+                rd = csv.reader(io.TextIOWrapper(f, "utf-8-sig", errors="replace"))
+                head = next(rd, [])
+                if "stop_id" in head:
+                    i = head.index("stop_id")
+                    for row in rd:
+                        if len(row) > i:
+                            calls[row[i]] += 1
 
         by_name = {}
         for r in rows(z, "stops.txt"):
@@ -129,7 +145,8 @@ def build(zips, country):
                 # 묶인 정류장의 stop_id를 모두 들고 간다. 시간표는 전부 합쳐 보여준다.
                 batch.append((nm, feed_id, ",".join(x[0] for x in c),
                               c[0][1], c[0][2],
-                              "1" if any(x[3] == "1" for x in c) else "0"))
+                              "1" if any(x[3] == "1" for x in c) else "0",
+                              sum(calls[x[0]] for x in c)))
         if not batch:
             skipped += 1
             continue
@@ -140,7 +157,7 @@ def build(zips, country):
                     (feed_id, str(p), ag.get("agency_name") or "",
                      ag.get("agency_timezone") or "", country.get(feed_id, ""),
                      len(batch)))
-        con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?)", batch)
+        con.executemany("INSERT INTO stops VALUES (?,?,?,?,?,?,?)", batch)
         n_stop += len(batch)
         n_feed += 1
 
@@ -177,17 +194,18 @@ def search(q, country="", limit=20):
     fts = '"' + q.strip().replace('"', '""') + '"*'
     rows = _con().execute("""
         SELECT s.name, s.feed_id, s.stop_id, s.lat, s.lon, s.is_station,
-               f.agency, f.country, coalesce(f.n_stops, 0)
+               f.agency, f.country, s.trips
         FROM stops s LEFT JOIN feeds f ON f.feed_id = s.feed_id
         WHERE s.stops MATCH ? AND (? = '' OR f.country = ?)
-        ORDER BY (s.name = ?) DESC,          -- 정확히 일치하는 이름이 먼저
-                 coalesce(f.n_stops, 0) DESC, -- 큰 망이 먼저
+        ORDER BY (s.name = ?) DESC,               -- 정확히 일치하는 이름이 먼저
+                 CAST(s.trips AS INTEGER) DESC,   -- 차가 많이 서는 곳이 먼저
                  rank, length(s.name)
         LIMIT ?
     """, (fts, country, country, q.strip(), limit)).fetchall()
     return [{"stop_name": r[0], "feed_id": r[1], "stop_id": r[2],
              "lat": r[3], "lon": r[4], "is_station": r[5] == "1",
-             "agency": r[6] or "", "country": r[7] or "", "net": r[8]} for r in rows]
+             "agency": r[6] or "", "country": r[7] or "",
+             "trips": int(r[8] or 0)} for r in rows]
 
 
 def feed_info(feed_id):
