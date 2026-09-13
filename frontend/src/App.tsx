@@ -66,7 +66,7 @@ export default function App() {
     });
   }, [start]);
 
-  const search = useCallback(async (q: string, cc: string) => {
+  const search = useCallback(async (q: string, cc: string, near?: Stop | null) => {
     const mine = ++run.current;
     if (!q.trim()) {
       setHits([]);
@@ -75,7 +75,7 @@ export default function App() {
     setBusy(true);
     let rows: Stop[] = [];
     try {
-      rows = await api.searchStops(q, cc);
+      rows = await api.searchStops(q, cc, near);
     } catch {
       rows = [];
     }
@@ -94,7 +94,10 @@ export default function App() {
   const q = text[active];
   useEffect(() => {
     if (stop[active] && shown(stop[active]!) === q) return; // 고른 직후엔 다시 찾지 않는다
-    const t = setTimeout(() => void search(q, country), 230);
+    // 반대쪽이 정해져 있으면 그 근처를 먼저 보여준다. 도착지를 고를 때
+    // 출발지에서 먼 같은 이름 정류장이 위에 올 이유가 없다.
+    const other = stop[active === "from" ? "to" : "from"];
+    const t = setTimeout(() => void search(q, country, other), 230);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, country, active]);
@@ -148,6 +151,9 @@ export default function App() {
     setStop((p) => ({ ...p, [active]: s }));
     setText((p) => ({ ...p, [active]: shown(s) }));
     setHits([]);
+    // 한 쪽이 정해지면 나라도 거기로 맞춘다. 일본에서 출발해 호주로 가는
+    // 대중교통 경로는 없으므로 선택지에 남겨둘 이유가 없다.
+    if (!country && s.country) setCountry(s.country);
     if (active === "from" && !stop.to) setActive("to");
   };
 

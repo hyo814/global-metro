@@ -57,7 +57,7 @@ def _num(v):
         return False
 
 
-def _dist(a, b):
+def haversine(a, b):
     """두 (lat, lon) 사이 대략 거리(m). 좌표가 없으면 None."""
     try:
         la1, lo1 = float(a[0]), float(a[1])
@@ -80,7 +80,7 @@ def cluster(stops, radius=500):
     out = []
     for s in stops:
         for c in out:
-            d = _dist((s[1], s[2]), (c[0][1], c[0][2]))
+            d = haversine((s[1], s[2]), (c[0][1], c[0][2]))
             if d is not None and d <= radius:
                 c.append(s)
                 break
@@ -208,8 +208,13 @@ def countries():
         "GROUP BY country ORDER BY 2 DESC")]
 
 
-def search(q, country="", limit=20):
-    """접두 질의. 특수문자가 FTS5 구문을 깨지 않게 통째로 인용한다."""
+def search(q, country="", limit=20, near=None):
+    """접두 질의. 특수문자가 FTS5 구문을 깨지 않게 통째로 인용한다.
+
+    near=(위도, 경도)를 주면 그 지점에서 가까운 순으로 다시 세운다. 도착지를
+    고를 때 출발지 근처가 먼저 와야 한다 — 같은 나라 안에도 같은 이름의
+    정류장이 여럿이다.
+    """
     if not q.strip():
         return []
     fts = '"' + q.strip().replace('"', '""') + '"*'
@@ -222,11 +227,21 @@ def search(q, country="", limit=20):
                  CAST(s.trips AS INTEGER) DESC,   -- 차가 많이 서는 곳이 먼저
                  rank, length(s.name)
         LIMIT ?
-    """, (fts, country, country, q.strip(), limit)).fetchall()
-    return [{"stop_name": r[0], "feed_id": r[1], "stop_id": r[2],
-             "lat": r[3], "lon": r[4], "is_station": r[5] == "1",
-             "agency": r[6] or "", "country": r[7] or "",
-             "trips": int(r[8] or 0)} for r in rows]
+    """, (fts, country, country, q.strip(), limit * 4 if near else limit)).fetchall()
+    out = [{"stop_name": r[0], "feed_id": r[1], "stop_id": r[2],
+            "lat": r[3], "lon": r[4], "is_station": r[5] == "1",
+            "agency": r[6] or "", "country": r[7] or "",
+            "trips": int(r[8] or 0)} for r in rows]
+    if near:
+        # 거리만으로 세우면 중요도를 잃는다. 도쿄에서 渋谷를 찾을 때 출발지에
+        # 조금 더 가깝다는 이유로 渋谷区役所前이 渋谷駅前을 이겨선 안 된다.
+        # 2km 구간으로 묶고, 같은 구간 안에서는 차가 많이 서는 곳이 먼저다.
+        def key(x):
+            d = haversine((x["lat"], x["lon"]), near)
+            return (int((d if d is not None else 1e9) // 2000), -x["trips"])
+        out.sort(key=key)
+        out = out[:limit]
+    return out
 
 
 def stop_by_id(feed_id, stop_id):

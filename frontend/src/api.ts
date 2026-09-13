@@ -1,5 +1,7 @@
 export type Stop = {
   stop_name: string;
+  lat: string;
+  lon: string;
   stop_name_ko: string;
   feed_id: string;
   stop_id: string;
@@ -39,8 +41,11 @@ async function get<T>(path: string): Promise<T> {
 
 export const countries = () => get<{ code: string; feeds: number }[]>("/api/countries");
 
-export const searchStops = (q: string, country: string) =>
-  get<Stop[]>(`/api/stops?q=${encodeURIComponent(q)}&country=${encodeURIComponent(country)}`);
+export const searchStops = (q: string, country: string, near?: Stop | null) =>
+  get<Stop[]>(
+    `/api/stops?q=${encodeURIComponent(q)}&country=${encodeURIComponent(country)}` +
+      (near ? `&near=${encodeURIComponent(`${near.lat},${near.lon}`)}` : ""),
+  );
 
 export type Leg = {
   mode: "walk" | "ride";

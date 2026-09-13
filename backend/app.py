@@ -17,7 +17,7 @@ from functools import lru_cache
 from flask import Flask, jsonify, request, send_from_directory
 
 from build_index import (countries, ensure_geo, feed_info, feeds_covering,
-                         search, stop_by_id)
+                         haversine as _haversine, search, stop_by_id)
 from gtfs import Feed, hhmm, secs
 from router import Timetable
 from router import search as find_route
@@ -96,7 +96,16 @@ def stops():
     if not q:
         return jsonify([])
 
-    rows = search(q, country, limit=25)
+    near = None
+    raw = request.args.get("near", "").strip()
+    if "," in raw:
+        try:
+            la, lo = (float(x) for x in raw.split(",", 1))
+            near = (la, lo)
+        except ValueError:
+            near = None
+
+    rows = search(q, country, limit=25, near=near)
     # 한글로 검색하면 인덱스(현지 표기)에 걸리지 않는다. 현지 표기 후보로 바꿔
     # 다시 찾는다. 이게 이 앱을 만든 이유라서 폴백이 아니라 본 경로에 가깝다.
     if not rows:
@@ -111,7 +120,7 @@ def stops():
             # 더 정확한 뒤쪽 후보("新宿" 다음의 "新宿駅")가 검색조차 안 된다.
             seen, out = set(), []
             for cand in cands:
-                for r in search(cand, cc, limit=25):
+                for r in search(cand, cc, limit=25, near=near):
                     key = (r["feed_id"], r["stop_id"])
                     if key not in seen:
                         seen.add(key)
@@ -139,7 +148,20 @@ def stops():
             return max((len(c) for c in cands if n.startswith(c.casefold())),
                        default=0)
 
-        pool.sort(key=lambda r: (r["stop_name"].casefold() not in low,
+        def far(r):
+            """출발지에서 얼마나 먼가. 5km 구간. near가 없으면 모두 같은 값."""
+            if not near:
+                return 0
+            try:
+                d = _haversine((float(r["lat"]), float(r["lon"])), near)
+            except (TypeError, ValueError):
+                return 1 << 20
+            return int(d // 5000)
+
+        # 근접이 이름 일치보다 앞선다. 반대쪽 정류장이 도쿄에 있는데 나가노
+        # 마을버스의 같은 이름 정류장이 위에 올 이유가 없다.
+        pool.sort(key=lambda r: (far(r),
+                                 r["stop_name"].casefold() not in low,
                                  -specificity(r["stop_name"]),
                                  -r["trips"], len(r["stop_name"])))
         rows = pool[:25]
