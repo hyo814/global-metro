@@ -42,6 +42,21 @@ python3 backend/build_index.py
 `fetch_gtfs.py`는 `--country JP`처럼 일부만 받을 수도 있다. 전 세계가 필요 없으면
 그게 빠르다.
 
+## 서버에 올리기 — 밖에서 폰으로 쓰기
+
+디스크 30GB 이상인 리눅스 서버(예: Hetzner CX22)에 Docker를 깔고:
+
+```bash
+# 맥에서: 코드와 데이터(약 19GB)를 올린다. 중단돼도 다시 치면 이어간다
+rsync -avP --exclude node_modules --exclude .git ./ root@<서버IP>:/srv/app/
+
+# 서버에서: .env에 DOMAIN, AUTH_USER, AUTH_HASH_B64를 채우고 (.env.example 참고)
+cd /srv/app && docker compose up -d --build
+```
+
+`https://<서버IP>.sslip.io`로 열고, 폰에서 "홈 화면에 추가"를 누르면 앱처럼 쓸 수 있다.
+HTTPS는 Caddy가 자동으로 붙인다. 번역에 API 요금이 들기 때문에 비밀번호를 걸어 둔다.
+
 ## 구조
 
 ```

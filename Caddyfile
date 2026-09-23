@@ -1,0 +1,9 @@
+# DOMAIN이 없으면 <서버IP>.sslip.io 를 쓰면 된다 — 도메인 없이도 HTTPS가 나온다.
+# 번역이 ANTHROPIC_API_KEY 요금을 쓰므로 공개 주소는 비밀번호로 막는다.
+{$DOMAIN} {
+	basic_auth {
+		{$AUTH_USER} {$AUTH_HASH_B64}
+	}
+	encode gzip
+	reverse_proxy app:8000
+}

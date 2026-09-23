@@ -1,0 +1,21 @@
+# 서버 배포: 앱 + Caddy(HTTPS 자동 발급, 비밀번호). 설정은 .env 하나.
+services:
+  app:
+    build: .
+    env_file: .env
+    volumes:
+      - ./gtfs:/srv/gtfs
+      - ./.cache:/srv/.cache
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    env_file: .env
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy:/data
+    restart: unless-stopped
+
+volumes:
+  caddy:

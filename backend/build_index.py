@@ -201,9 +201,11 @@ def build(zips, country):
 
 
 def _abs(zip_path):
-    """예전 인덱스는 상대경로를 담고 있다. 실행 위치와 무관하게 열리도록 푼다."""
+    """인덱스는 만든 기계의 경로를 담고 있다(예전 것은 상대경로, 지금은 맥의
+    절대경로). 그 경로에 없으면 이 기계의 gtfs/에서 같은 이름을 찾는다 —
+    맥에서 만든 인덱스를 서버에 그대로 올려도 열리게."""
     q = pathlib.Path(zip_path)
-    return str(q if q.is_absolute() else ROOT / q)
+    return str(q if q.is_absolute() and q.exists() else GTFS / q.name)
 
 
 def _con():
